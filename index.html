@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+  <title>Fresh Adat | Organic & Fresh</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="/logo.png" type="image/png">
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="logo"><i class="fas fa-leaf"></i> Fresh Adat</div>
+    <div class="search-bar">
+      <i class="fas fa-search"></i>
+      <input type="text" id="desktopSearch" placeholder="Search vegetables, fruits, spices…" autocomplete="off">
+      <button class="search-clear-btn" id="desktopClearBtn" style="display:none;"><i class="fas fa-times-circle"></i></button>
+      <div class="suggestions-dropdown" id="desktopSuggestions"></div>
+    </div>
+    <div class="mobile-actions">
+      <button class="search-icon-btn" id="mobileSearchIcon" aria-label="Search"><i class="fas fa-search"></i></button>
+      <button class="cart-btn" id="cartButton">
+        <i class="fas fa-shopping-cart"></i> <span>Cart</span> <span class="cart-count" id="cartCount">0</span>
+      </button>
+    </div>
+  </div>
+  <div class="mobile-search-row" id="mobileSearchRow">
+    <div class="mobile-search-container">
+      <i class="fas fa-arrow-left mobile-search-icon" id="mobileSearchInnerIcon"></i>
+      <input type="text" id="mobileSearchInput" placeholder="Search products..." autocomplete="off">
+      <button class="search-clear-btn" id="mobileClearBtn" style="display:none;"><i class="fas fa-times-circle"></i></button>
+      <div class="suggestions-dropdown" id="mobileSuggestions"></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="category-header">
+    <div class="cat-row" id="catRow"></div>
+    <button class="arrow-more-btn" id="arrowMoreBtn"><i class="fas fa-chevron-right"></i></button>
+  </div>
+  <div class="products-grid" id="productsGrid"></div>
+  <div class="home-carousel-section" id="homeCarouselSection" style="display: none;">
+    <div class="carousel-header">
+      <h3><i class="fas fa-star"></i> 🔥 More Fresh Picks</h3>
+      <span class="carousel-hint"><i class="fas fa-arrow-left"></i> Swipe to explore <i class="fas fa-arrow-right"></i></span>
+    </div>
+    <div class="horizontal-scroll-wrapper" id="homeCarousel"></div>
+  </div>
+</main>
+
+<!-- Cart Panel -->
+<div class="cart-overlay" id="cartOverlay"></div>
+<div class="cart-panel" id="cartPanel">
+  <div class="cart-header">
+    <h2><i class="fas fa-shopping-cart"></i> Your Cart</h2>
+    <button class="close-btn" id="closeCartBtn"><i class="fas fa-times"></i></button>
+  </div>
+  <div class="cart-items" id="cartItems"></div>
+  <div class="cart-footer" id="cartFooter" style="display:none">
+    <div class="cart-total"><span>Items</span><span id="footerItems">0</span></div>
+    <div class="cart-total grand"><span>Total</span><span id="footerTotal">₹0</span></div>
+    <button type="button" class="order-btn" id="orderBtn"><i class="fab fa-whatsapp"></i> Place Order</button>
+  </div>
+</div>
+
+<!-- Order Modal - Full Size -->
+<div id="modalOverlay">
+  <div id="modalBox">
+    <div class="modal-flex">
+      <div class="modal-left">
+        <h3><i class="fas fa-truck"></i> Delivery Details</h3>
+        <input id="custName" placeholder="Full name *">
+        <input id="custPhone" placeholder="Phone number *">
+        <textarea id="custAddress" placeholder="Complete address *"></textarea>
+        <button class="loc-btn" id="getLocationBtn"><i class="fas fa-location-dot"></i> Get current location & distance</button>
+        <input id="custLocation" placeholder="Location link (auto)" readonly>
+        <iframe id="mapFrame" style="width:100%; height:150px; border-radius:12px; display:none;"></iframe>
+        <input id="custNote" placeholder="Special instruction (optional)">
+      </div>
+      <div class="modal-right">
+        <h3><i class="fas fa-receipt"></i> Order Summary</h3>
+        <div id="orderSummary" class="summary-box"></div>
+        <div class="price-line"><span><i class="fas fa-road"></i> Distance</span><span id="distanceText">0 km</span></div>
+        <div class="price-line"><span><i class="fas fa-motorcycle"></i> Delivery</span><span>₹<span id="deliveryCharge">0</span></span></div>
+        <div class="price-total"><i class="fas fa-rupee-sign"></i> <strong>Total:</strong> ₹<span id="finalTotal">0</span></div>
+        <div id="deliveryWarningBox" class="delivery-warning" style="display:none;">
+          <i class="fas fa-exclamation-triangle"></i> <strong>Delivery not available beyond 5 km</strong><br>Please change address or contact store.
+        </div>
+        <div class="modal-buttons">
+          <button class="cancel-btn" id="cancelModalBtn">Cancel</button>
+          <button class="send-btn" id="sendWhatsAppBtn"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Categories Modal - Full Size with Images -->
+<div id="categoriesModal" class="categories-modal">
+  <div class="categories-modal-content">
+    <div class="categories-modal-header">
+      <h3><i class="fas fa-tags"></i> All Categories</h3>
+      <button class="close-categories-modal" id="closeCategoriesModal">&times;</button>
+    </div>
+    <div class="categories-grid" id="categoriesGrid"></div>
+  </div>
+</div>
+
+<!-- Vision & Impact Modal -->
+<div id="visionModal" class="vision-modal">
+  <div class="vision-modal-content">
+    <div class="vision-modal-header">
+      <h3><i class="fas fa-eye"></i> Our Vision & Impact</h3>
+      <button class="close-vision-modal" id="closeVisionModal">&times;</button>
+    </div>
+    <div class="vision-modal-body">
+      <p><strong>🌱 Our Vision</strong><br>To make fresh, organic, and healthy food accessible to every household while empowering local farmers and small‑scale producers.</p>
+      <p><strong>👥 People Empowered</strong><br>Through Fresh Adat, we have directly supported <strong>50+ local farmers</strong>, created <strong>25+ jobs</strong> for women in rural areas, and trained <strong>100+ small vendors</strong> in sustainable practices.</p>
+      <p><strong>📈 Community Impact</strong><br>Since our launch, we have helped reduce food waste by partnering with local farms, and we continue to expand our network to bring you the freshest produce daily.</p>
+      <p><strong>💚 Join the Movement</strong><br>Every purchase supports a healthier you and a stronger local economy. Together, we build a healthier, happier community.</p>
+    </div>
+  </div>
+</div>
+
+<footer class="app-footer">
+  <div class="footer-inner">
+    <div class="footer-tagline">
+      <i class="fas fa-leaf"></i> Live Healthy Live Happy
+    </div>
+    <div class="footer-links">
+      <a href="#" id="visionLink" class="vision-link">
+        <i class="fas fa-eye"></i> Our Vision & Impact
+      </a>
+    </div>
+    <div class="developer-credit">
+      Powered by <strong><a href="https://stmgroups.com" target="_blank" rel="noopener noreferrer">STM Groups</a></strong>
+    </div>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
