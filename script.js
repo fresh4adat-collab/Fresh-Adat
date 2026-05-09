@@ -6,7 +6,6 @@ const MAX_DISTANCE_KM = 5;
 const FREE_DELIVERY_THRESHOLD = 200;
 const MAX_QTY_PER_PRODUCT = 4;
 
-// New constants for pending order flow
 const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
 
@@ -21,14 +20,9 @@ let productsGrid, catRow, cartCountSpan, cartOverlay, cartPanel, cartItems, cart
 let modalOverlay, custName, custPhone, custAddress, custLocation, mapFrame, distanceSpan, deliveryChargeSpan, finalTotalSpan, deliveryWarningBox, sendBtn, orderSummaryDiv;
 let toastEl;
 let categoriesModal, categoriesGrid, arrowMoreBtn;
-
-// Search elements
 let desktopSearch, mobileSearch, desktopClearBtn, mobileClearBtn, desktopSuggestions, mobileSuggestions;
-
-// Global image map (from Sheet5)
 let imageMap = {};
 
-// Fallback images
 const FALLBACK_IMAGES = {
   slide1: 'https://via.placeholder.com/800x400?text=Slide+1',
   slide2: 'https://via.placeholder.com/800x400?text=Slide+2',
@@ -47,7 +41,6 @@ const FALLBACK_IMAGES = {
   organic: 'https://via.placeholder.com/90?text=Organic'
 };
 
-// Helper functions (showToast, getImageUrl, etc. - keep all as they were)
 function getImageUrl(key) {
   const lowerKey = key.toLowerCase();
   if (imageMap[lowerKey]) return imageMap[lowerKey];
@@ -703,7 +696,7 @@ function openOrderModal() {
 
 function closeOrderModal() { modalOverlay.classList.remove('show'); }
 
-// ========== NEW PROFESSIONAL WHATSAPP ORDER FLOW ==========
+// ========== PENDING ORDER & WHATSAPP FLOW ==========
 function createPendingOrder() {
   const order = {
     id: 'pending_' + Date.now(),
@@ -729,7 +722,6 @@ function clearPendingOrder() {
 }
 
 function showPendingOrderBanner() {
-  // Avoid duplicate banners
   if (document.getElementById('pendingOrderBanner')) return;
   const banner = document.createElement('div');
   banner.id = 'pendingOrderBanner';
@@ -763,7 +755,6 @@ function showPendingOrderBanner() {
   document.body.appendChild(banner);
   
   document.getElementById('confirmOrderBtn').onclick = () => {
-    // Clear cart
     cart = {};
     updateCartCountUI();
     renderProducts();
@@ -771,7 +762,6 @@ function showPendingOrderBanner() {
     clearPendingOrder();
     banner.remove();
     showToast('✅ Order confirmed! We will process it shortly.');
-    // Optionally: send confirmation to backend
   };
   
   document.getElementById('dismissBannerBtn').onclick = () => {
@@ -780,7 +770,6 @@ function showPendingOrderBanner() {
   };
 }
 
-// Replacement for old sendWhatsApp
 function sendWhatsAppNew() {
   const subtotal = getCartSubtotal();
   if (currentDistance > MAX_DISTANCE_KM && subtotal <= FREE_DELIVERY_THRESHOLD) {
@@ -796,11 +785,8 @@ function sendWhatsAppNew() {
     return;
   }
   saveFormToLocalStorage();
-  
-  // Create pending order before opening WhatsApp
   createPendingOrder();
   
-  // Build WhatsApp message
   let itemsList = '', total = 0;
   Object.keys(cart).forEach(id => {
     const p = products.find(x => x.id == id);
@@ -814,13 +800,9 @@ function sendWhatsAppNew() {
   const note = document.getElementById('custNote')?.value.trim() || '-';
   const msg = `🌿 *FRESH ADAT ORDER*\n━━━━━━━━━━━━━━\n🆔 Order: ${orderId}\n👤 ${name} | ${phone}\n📍 ${address}\n🗺️ Location: ${locationLink}\n\n🛒 Items:\n${itemsList}\n💰 TOTAL: ₹${total}\n📝 Note: ${note}\nThank you!`;
   
-  // Open WhatsApp
   window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
-  
-  // Close the order modal
   closeOrderModal();
   
-  // Listen for page visibility change (user returns from WhatsApp)
   const visibilityHandler = () => {
     if (document.visibilityState === 'visible') {
       document.removeEventListener('visibilitychange', visibilityHandler);
@@ -924,9 +906,41 @@ function loadData() {
   });
 }
 
-// ========== DOMContentLoaded (with PWA install inside) ==========
+// ========== ENHANCED BACK BUTTON HANDLER ==========
+function resetToHome() {
+  closeCart();
+  closeOrderModal();
+  closeCategoriesModal();
+  const visionModal = document.getElementById('visionModal');
+  if (visionModal && visionModal.classList.contains('open')) visionModal.classList.remove('open');
+  
+  selectedCat = 'All';
+  searchTerm = '';
+  selectedSuggestionProduct = null;
+  
+  if (desktopSearch) desktopSearch.value = '';
+  if (mobileSearch) mobileSearch.value = '';
+  if (desktopSuggestions) desktopSuggestions.classList.remove('active');
+  if (mobileSuggestions) mobileSuggestions.classList.remove('active');
+  updateClearButtons();
+  
+  renderCategories();
+  renderProducts();
+}
+
+window.addEventListener('popstate', function(event) {
+  resetToHome();
+  if (window.location.pathname !== '/' && window.location.pathname !== '') {
+    history.replaceState(null, '', '/');
+  }
+});
+
+if (window.history.length <= 2) {
+  history.pushState(null, '', location.href);
+}
+
+// ========== DOMContentLoaded ==========
 document.addEventListener('DOMContentLoaded', () => {
-  // Your existing DOM element assignments
   productsGrid = document.getElementById('productsGrid');
   catRow = document.getElementById('catRow');
   cartCountSpan = document.getElementById('cartCount');
@@ -953,7 +967,6 @@ document.addEventListener('DOMContentLoaded', () => {
   categoriesGrid = document.getElementById('categoriesGrid');
   arrowMoreBtn = document.getElementById('arrowMoreBtn');
 
-  // Your existing event listeners
   document.getElementById('cartButton').addEventListener('click', openCart);
   document.getElementById('closeCartBtn').addEventListener('click', closeCart);
   cartOverlay.addEventListener('click', closeCart);
@@ -993,7 +1006,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   
-  // Vision Modal
   const visionModal = document.getElementById('visionModal');
   const visionLink = document.getElementById('visionLink');
   const closeVisionBtn = document.getElementById('closeVisionModal');
@@ -1005,20 +1017,10 @@ document.addEventListener('DOMContentLoaded', () => {
     visionModal.addEventListener('click', (e) => { if (e.target === visionModal) visionModal.classList.remove('open'); });
   }
   
-  // Back button handler
-  if (window.history.length <= 2) {
-    history.pushState(null, '', location.href);
-  }
-  window.addEventListener('popstate', function(event) {
-    if (window.location.pathname !== '/' && window.location.pathname !== '') {
-      window.location.href = '/';
-    }
-  });
-  
   initSearchListeners();
   loadData();
 
-  // ========== PWA INSTALL (moved inside DOMContentLoaded) ==========
+  // ========== PWA INSTALL (inside DOMContentLoaded) ==========
   let deferredPrompt;
   const installBanner = document.getElementById('installBanner');
   const installBtn = document.getElementById('installAppBtn');

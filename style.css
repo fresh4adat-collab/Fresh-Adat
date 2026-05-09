@@ -687,7 +687,6 @@ main {
   cursor: pointer;
 }
 
-/* Order Modal Clean */
 /* Order Modal - Full Screen */
 #modalOverlay {
   position: fixed;
@@ -697,7 +696,6 @@ main {
   display: none;
   align-items: center;
   justify-content: center;
-  /* No padding – full screen */
   backdrop-filter: blur(4px);
 }
 #modalOverlay.show {
@@ -1263,10 +1261,4 @@ main {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-}
-@media (max-width: 768px) {
-  .modal-flex {
-    padding: 16px;
-    gap: 24px;
-  }
 }
