@@ -924,8 +924,9 @@ function loadData() {
   });
 }
 
-// ========== DOMContentLoaded ==========
+// ========== DOMContentLoaded (with PWA install inside) ==========
 document.addEventListener('DOMContentLoaded', () => {
+  // Your existing DOM element assignments
   productsGrid = document.getElementById('productsGrid');
   catRow = document.getElementById('catRow');
   cartCountSpan = document.getElementById('cartCount');
@@ -952,17 +953,14 @@ document.addEventListener('DOMContentLoaded', () => {
   categoriesGrid = document.getElementById('categoriesGrid');
   arrowMoreBtn = document.getElementById('arrowMoreBtn');
 
+  // Your existing event listeners
   document.getElementById('cartButton').addEventListener('click', openCart);
   document.getElementById('closeCartBtn').addEventListener('click', closeCart);
   cartOverlay.addEventListener('click', closeCart);
   document.getElementById('orderBtn').addEventListener('click', openOrderModal);
   document.getElementById('getLocationBtn').addEventListener('click', getLocation);
   document.getElementById('cancelModalBtn').addEventListener('click', closeOrderModal);
-  // Replace old sendWhatsApp with new version
-  if (sendBtn) {
-    // Remove any existing listener if needed (but we are defining fresh)
-    sendBtn.addEventListener('click', sendWhatsAppNew);
-  }
+  if (sendBtn) sendBtn.addEventListener('click', sendWhatsAppNew);
   arrowMoreBtn.addEventListener('click', openCategoriesModal);
   document.getElementById('closeCategoriesModal').addEventListener('click', closeCategoriesModal);
   categoriesModal.addEventListener('click', (e) => { if (e.target === categoriesModal) closeCategoriesModal(); });
@@ -1019,52 +1017,44 @@ document.addEventListener('DOMContentLoaded', () => {
   
   initSearchListeners();
   loadData();
-});
-// PWA Install – Safe & reliable
-let deferredPrompt;
-const installBanner = document.getElementById('installBanner');
-const installBtn = document.getElementById('installAppBtn');
-const closeInstallBanner = document.getElementById('closeInstallBanner');
 
-window.addEventListener('beforeinstallprompt', (e) => {
-  console.log('📲 beforeinstallprompt fired');
-  // Prevent Chrome 67+ from auto-prompting
-  e.preventDefault();
-  // Store the event for later use
-  deferredPrompt = e;
-  // Show your custom install banner (if it exists)
-  if (installBanner) installBanner.style.display = 'flex';
-});
+  // ========== PWA INSTALL (moved inside DOMContentLoaded) ==========
+  let deferredPrompt;
+  const installBanner = document.getElementById('installBanner');
+  const installBtn = document.getElementById('installAppBtn');
+  const closeInstallBanner = document.getElementById('closeInstallBanner');
 
-// Handle the install button click
-if (installBtn) {
-  installBtn.addEventListener('click', async () => {
-    if (!deferredPrompt) {
-      console.log('No deferredPrompt – already installed or not available');
-      return;
-    }
-    // Show the native install prompt
-    deferredPrompt.prompt();
-    // Wait for the user's choice
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to install: ${outcome}`);
-    // Reset the deferredPrompt variable – it can only be used once
+  window.addEventListener('beforeinstallprompt', (e) => {
+    console.log('📲 beforeinstallprompt fired');
+    e.preventDefault();
+    deferredPrompt = e;
+    if (installBanner) installBanner.style.display = 'flex';
+  });
+
+  if (installBtn) {
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) {
+        console.log('No deferredPrompt – maybe already installed');
+        alert('Click the three dots ⋮ and select "Install app"');
+        return;
+      }
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`User response to install: ${outcome}`);
+      deferredPrompt = null;
+      if (installBanner) installBanner.style.display = 'none';
+    });
+  }
+
+  if (closeInstallBanner) {
+    closeInstallBanner.addEventListener('click', () => {
+      if (installBanner) installBanner.style.display = 'none';
+    });
+  }
+
+  window.addEventListener('appinstalled', () => {
+    console.log('✅ App installed successfully');
+    if (installBanner) installBanner.style.display = 'none';
     deferredPrompt = null;
-    // Hide the custom banner
-    if (installBanner) installBanner.style.display = 'none';
   });
-}
-
-// Dismiss banner
-if (closeInstallBanner) {
-  closeInstallBanner.addEventListener('click', () => {
-    if (installBanner) installBanner.style.display = 'none';
-  });
-}
-
-// Optional: hide banner if app is installed successfully
-window.addEventListener('appinstalled', () => {
-  console.log('✅ App installed successfully');
-  if (installBanner) installBanner.style.display = 'none';
-  deferredPrompt = null;
 });
