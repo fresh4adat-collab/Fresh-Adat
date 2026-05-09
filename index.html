@@ -9,11 +9,45 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Fresh Adat">
   <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
-  <title>Fresh Adat | Organic & Fresh</title>
+  <!-- Primary SEO Meta -->
+<title>Fresh Adat – Online Grocery Delivery | Fresh Vegetables, Fruits & Organic</title>
+<meta name="description" content="Fresh Adat delivers fresh vegetables, fruits, organic produce, dairy, meats, and more to your door. Order online for fast grocery delivery in your area.">
+<meta name="keywords" content="Fresh Adat, online grocery, fresh vegetables, organic fruits, grocery delivery, Adat grocery">
+<meta name="author" content="Fresh Adat">
+<meta name="robots" content="index, follow">
+<meta name="googlebot" content="index, follow">
+
+<!-- Canonical URL (replace with your actual domain) -->
+<link rel="canonical" href="https://www.freshdat.store/">
+
+<!-- Language & Region -->
+<meta name="language" content="English">
+<meta name="geo.region" content="IN-KL">
+<meta name="geo.placename" content="Thrissur">
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="/logo.png" type="image/png">
+  <!-- Open Graph / Facebook / LinkedIn -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.freshdat.store/">
+<meta property="og:title" content="Fresh Adat – Fresh Organic Grocery Delivered">
+<meta property="og:description" content="Order fresh vegetables, fruits, organic produce, dairy, and meats online. Fast delivery from Fresh Adat.">
+<meta property="og:image" content="https://www.freshdat.store/icons/icon-512x512.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:site_name" content="Fresh Adat">
+<meta property="og:locale" content="en_IN">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Fresh Adat – Online Grocery Delivery">
+<meta name="twitter:description" content="Fresh vegetables, fruits, organic groceries delivered to your doorstep.">
+<meta name="twitter:image" content="https://www.freshdat.store/icons/icon-512x512.png">
+<!-- Favicon -->
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png">
 </head>
 <body>
 
@@ -163,5 +197,62 @@
 <div class="toast" id="toast"></div>
 
 <script src="script.js"></script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "GroceryStore",
+  "name": "Fresh Adat",
+  "url": "https://www.freshdat.store/",
+  "logo": "https://www.freshdat.store/icons/icon-512x512.png",
+  "image": "https://www.freshdat.store/icons/icon-512x512.png",
+  "description": "Fresh organic vegetables, fruits, dairy, meats, and groceries delivered to your doorstep.",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "Adat, Thrissur",
+    "addressLocality": "Thrissur",
+    "addressRegion": "KL",
+    "postalCode": "680001",
+    "addressCountry": "IN"
+  },
+  "geo": {
+    "@type": "GeoCoordinates",
+    "latitude": 10.5530,
+    "longitude": 76.1668
+  },
+  "telephone": "+919447570336",
+  "email": "fresh4adat@gmail.com",
+  "priceRange": "₹",
+  "openingHours": ["Mo-Su 06:00-22:00"],
+  "sameAs": [
+    "https://www.instagram.com/freshadat",
+    "https://www.facebook.com/freshadat"
+  ],
+  "paymentAccepted": ["Cash on Delivery", "Google Pay", "PhonePe"],
+  "deliveryArea": {
+    "@type": "ServiceArea",
+    "name": "Thrissur and surrounding areas"
+  },
+  "hasOfferCatalog": {
+    "@type": "OfferCatalog",
+    "name": "Grocery Products",
+    "itemListElement": [
+      {
+        "@type": "Offer",
+        "itemOffered": {
+          "@type": "Product",
+          "name": "Fresh Vegetables"
+        }
+      },
+      {
+        "@type": "Offer",
+        "itemOffered": {
+          "@type": "Product",
+          "name": "Organic Fruits"
+        }
+      }
+    ]
+  }
+}
+</script>
 </body>
 </html>
