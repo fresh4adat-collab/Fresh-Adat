@@ -1020,52 +1020,51 @@ document.addEventListener('DOMContentLoaded', () => {
   initSearchListeners();
   loadData();
 });
-// ========== PWA INSTALL PROMPT ==========
+// PWA Install – Safe & reliable
 let deferredPrompt;
 const installBanner = document.getElementById('installBanner');
 const installBtn = document.getElementById('installAppBtn');
-const closeInstallBtn = document.getElementById('closeInstallBanner');
+const closeInstallBanner = document.getElementById('closeInstallBanner');
 
 window.addEventListener('beforeinstallprompt', (e) => {
+  console.log('📲 beforeinstallprompt fired');
   // Prevent Chrome 67+ from auto-prompting
   e.preventDefault();
+  // Store the event for later use
   deferredPrompt = e;
-  // Show the custom install banner
+  // Show your custom install banner (if it exists)
   if (installBanner) installBanner.style.display = 'flex';
 });
 
+// Handle the install button click
 if (installBtn) {
   installBtn.addEventListener('click', async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      console.log(`User response to install: ${outcome}`);
-      deferredPrompt = null;
-      if (installBanner) installBanner.style.display = 'none';
+    if (!deferredPrompt) {
+      console.log('No deferredPrompt – already installed or not available');
+      return;
     }
-  });
-}
-
-if (closeInstallBtn) {
-  closeInstallBtn.addEventListener('click', () => {
+    // Show the native install prompt
+    deferredPrompt.prompt();
+    // Wait for the user's choice
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to install: ${outcome}`);
+    // Reset the deferredPrompt variable – it can only be used once
+    deferredPrompt = null;
+    // Hide the custom banner
     if (installBanner) installBanner.style.display = 'none';
   });
 }
 
-// Optional: Hide banner if already installed
-window.addEventListener('appinstalled', () => {
-  if (installBanner) installBanner.style.display = 'none';
-  console.log('PWA installed');
-});
-// Register Service Worker
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(registration => {
-        console.log('SW registered: ', registration);
-      })
-      .catch(error => {
-        console.log('SW registration failed: ', error);
-      });
+// Dismiss banner
+if (closeInstallBanner) {
+  closeInstallBanner.addEventListener('click', () => {
+    if (installBanner) installBanner.style.display = 'none';
   });
 }
+
+// Optional: hide banner if app is installed successfully
+window.addEventListener('appinstalled', () => {
+  console.log('✅ App installed successfully');
+  if (installBanner) installBanner.style.display = 'none';
+  deferredPrompt = null;
+});
