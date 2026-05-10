@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Sitemap: https://www.freshadat.store/sitemap.xml
+
+# Disallow admin or private directories (if any)
+Disallow: /admin/
+Disallow: /private/

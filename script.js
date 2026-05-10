@@ -906,39 +906,45 @@ function loadData() {
   });
 }
 
-// ========== ENHANCED BACK BUTTON HANDLER ==========
+// ========== ENHANCED BACK BUTTON HANDLER (prevents app close) ==========
 function resetToHome() {
+  // Close all open UI elements
   closeCart();
   closeOrderModal();
   closeCategoriesModal();
   const visionModal = document.getElementById('visionModal');
   if (visionModal && visionModal.classList.contains('open')) visionModal.classList.remove('open');
   
+  // Reset all state variables
   selectedCat = 'All';
   searchTerm = '';
   selectedSuggestionProduct = null;
   
+  // Clear search inputs
   if (desktopSearch) desktopSearch.value = '';
   if (mobileSearch) mobileSearch.value = '';
   if (desktopSuggestions) desktopSuggestions.classList.remove('active');
   if (mobileSuggestions) mobileSuggestions.classList.remove('active');
   updateClearButtons();
   
+  // Re-render home page
   renderCategories();
   renderProducts();
 }
 
-window.addEventListener('popstate', function(event) {
-  resetToHome();
-  if (window.location.pathname !== '/' && window.location.pathname !== '') {
-    history.replaceState(null, '', '/');
-  }
-});
-
-if (window.history.length <= 2) {
-  history.pushState(null, '', location.href);
+// Ensure we always have at least one "home" state to go back to
+// This prevents the app from closing when back is pressed
+if (window.history.length <= 1) {
+  // Push a dummy state that represents the home view
+  history.pushState({ home: true }, '', location.href);
 }
 
+window.addEventListener('popstate', function(event) {
+  // Always reset to home view
+  resetToHome();
+  // Push a fresh home state again so next back press also goes to home (not close)
+  history.pushState({ home: true }, '', location.href);
+});
 // ========== DOMContentLoaded ==========
 document.addEventListener('DOMContentLoaded', () => {
   productsGrid = document.getElementById('productsGrid');
