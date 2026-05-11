@@ -1,8 +1,8 @@
 User-agent: *
 Allow: /
-Sitemap: https://www.freshdat.store/sitemap.xml
 
-# Disallow admin or private pages (if any)
+Sitemap: https://freshadat.store/sitemap.xml
+
+# Disallow admin or private directories
 Disallow: /admin/
-Disallow: /cart.html   (if separate)
-Disallow: /checkout/
+Disallow: /private/
