@@ -26,14 +26,14 @@
 
   "redirects": [
     {
-      "source": "/(.*)",
+      "source": "/:path*",
       "has": [
         {
           "type": "host",
           "value": "www.freshadat.store"
         }
       ],
-      "destination": "https://freshadat.store/$1",
+      "destination": "https://freshadat.store/:path*",
       "permanent": true
     }
   ]
