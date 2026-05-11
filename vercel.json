@@ -22,5 +22,19 @@
         }
       ]
     }
+  ],
+
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.freshadat.store"
+        }
+      ],
+      "destination": "https://freshadat.store/$1",
+      "permanent": true
+    }
   ]
 }
