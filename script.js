@@ -1,5 +1,5 @@
 // ----------------------------- CONFIGURATION -----------------------------
-const WHATSAPP_NUMBER = '919447570336';
+const WHATSAPP_NUMBER = '919496840336';
 const ADAT_LAT = 10.5530;
 const ADAT_LON = 76.1668;
 const MAX_DISTANCE_KM = 5;
