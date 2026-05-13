@@ -1,3 +1,7 @@
+function isRunningAsApp() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
 // ----------------------------- CONFIGURATION -----------------------------
 const WHATSAPP_NUMBER = '919496840336';
 const ADAT_LAT = 10.5530;
@@ -202,16 +206,33 @@ function initSlideshow() {
 }
 
 function attachCategorySquareEvents() {
+
   document.querySelectorAll('.category-square').forEach(sq => {
+
     sq.addEventListener('click', () => {
+
       const catValue = sq.dataset.catValue;
+
       if (catValue) {
+
         selectedCat = catValue;
+
         renderCategories();
+
         renderProducts();
+
+        // Scroll to top smoothly
+        window.scrollTo({
+          top: 0,
+          behavior: 'smooth'
+        });
+
       }
+
     });
+
   });
+
 }
 
 function renderHomeCarousel(productsToShow = null) {
@@ -235,26 +256,178 @@ function renderHomeCarousel(productsToShow = null) {
 }
 
 function renderSuggestionBasedResults(selectedProduct) {
+
   const homeCarouselSection = document.getElementById('homeCarouselSection');
-  if (homeCarouselSection) homeCarouselSection.style.display = 'none';
+
+  if (homeCarouselSection) {
+    homeCarouselSection.style.display = 'none';
+  }
 
   productsGrid.classList.add('block');
   productsGrid.style.display = 'block';
 
-  const matchedOthers = products.filter(p => productMatchesByTagSubstring(selectedProduct, p));
+  // Related products using tags
+  const matchedOthers = products.filter(p =>
+    productMatchesByTagSubstring(selectedProduct, p)
+  );
 
-  let html = `<div class="search-results-highlight">
-    <h3 style="font-family: 'Playfair Display', serif; color: var(--green); margin-bottom: 18px; display: flex; align-items: center; gap: 8px;">
-      <i class="fas fa-leaf" style="color: var(--orange);"></i> Products related to "${escapeHtml(selectedProduct.name)}"
-    </h3>
-    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;">
+  // Related by same category
+  const sameCategoryProducts = products.filter(p =>
+    p.category === selectedProduct.category &&
+    p.id !== selectedProduct.id
+  );
+
+  // Related by tags
+  const relatedByTags = products.filter(p => {
+
+    if (p.id === selectedProduct.id) return false;
+
+    if (p.category === selectedProduct.category) return false;
+
+    const selectedTags = (selectedProduct.tags || '')
+      .toLowerCase()
+      .split(',')
+      .map(t => t.trim());
+
+    const productTags = (p.tags || '')
+      .toLowerCase()
+      .split(',')
+      .map(t => t.trim());
+
+    return selectedTags.some(tag => productTags.includes(tag));
+
+  });
+
+  let html = `
+    <div class="search-results-highlight">
+
+      <h3 style="
+        font-family: 'Playfair Display', serif;
+        color: var(--green);
+        margin-bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      ">
+        <i class="fas fa-leaf" style="color: var(--orange);"></i>
+
+        Products related to "${escapeHtml(selectedProduct.name)}"
+      </h3>
+
+      <div style="
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+      ">
   `;
+
+  // Main selected product
   html += createProductCard(selectedProduct, true);
-  matchedOthers.forEach(p => { html += createProductCard(p, true); });
+
+  // Related products
+  matchedOthers.forEach(p => {
+    html += createProductCard(p, true);
+  });
+
   html += `</div></div>`;
 
+  // SAME CATEGORY CAROUSEL
+  if (sameCategoryProducts.length > 0) {
+
+    html += `
+      <div class="similar-products-section" style="margin-top: 28px;">
+
+        <div class="carousel-header">
+          <h3>
+            <i class="fas fa-tags"></i>
+            More from ${selectedProduct.category.replace(/-/g, ' ')}
+          </h3>
+
+          <span class="carousel-hint">
+            <i class="fas fa-arrow-left"></i>
+            Swipe to explore
+            <i class="fas fa-arrow-right"></i>
+          </span>
+        </div>
+
+        <div class="horizontal-scroll-wrapper"
+             id="suggestionCategoryCarousel">
+        </div>
+
+      </div>
+    `;
+  }
+
+  // RELATED TAGS CAROUSEL
+  if (relatedByTags.length > 0) {
+
+    html += `
+      <div class="related-by-tags-section" style="margin-top: 28px;">
+
+        <div class="carousel-header">
+
+          <h3>
+            <i class="fas fa-link"></i>
+            Related products
+          </h3>
+
+          <span class="carousel-hint">
+            <i class="fas fa-arrow-left"></i>
+            Swipe to explore
+            <i class="fas fa-arrow-right"></i>
+          </span>
+
+        </div>
+
+        <div class="horizontal-scroll-wrapper"
+             id="suggestionTagCarousel">
+        </div>
+
+      </div>
+    `;
+  }
+
   productsGrid.innerHTML = html;
+
   bindProductEvents(productsGrid);
+
+  // Render category carousel
+  if (sameCategoryProducts.length > 0) {
+
+    const catCarousel = document.getElementById('suggestionCategoryCarousel');
+
+    if (catCarousel) {
+
+      let carouselHtml = '';
+
+      sameCategoryProducts.forEach(p => {
+        carouselHtml += createProductCard(p, true);
+      });
+
+      catCarousel.innerHTML = carouselHtml;
+
+      bindProductEvents(catCarousel);
+    }
+  }
+
+  // Render tag carousel
+  if (relatedByTags.length > 0) {
+
+    const tagCarousel = document.getElementById('suggestionTagCarousel');
+
+    if (tagCarousel) {
+
+      let carouselHtml = '';
+
+      relatedByTags.forEach(p => {
+        carouselHtml += createProductCard(p, true);
+      });
+
+      tagCarousel.innerHTML = carouselHtml;
+
+      bindProductEvents(tagCarousel);
+    }
+  }
 }
 
 function renderSearchResults() {
@@ -412,11 +585,20 @@ function renderCategories() {
     return `<button class="cat-chip ${selectedCat === c ? 'active' : ''}" data-cat="${c}">${displayName}</button>`;
   }).join('');
   document.querySelectorAll('.cat-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      selectedCat = btn.dataset.cat;
-      renderCategories();
-      renderProducts();
-    });
+  btn.addEventListener('click', () => {
+
+  selectedCat = btn.dataset.cat;
+
+  renderCategories();
+
+  renderProducts();
+
+  window.scrollTo({
+    top: 0,
+    behavior: 'smooth'
+  });
+
+});
   });
 }
 
@@ -610,22 +792,26 @@ function getLocation() {
     distanceSpan.innerText = currentDistance.toFixed(2) + " km";
     const subtotal = getCartSubtotal();
     let delivery = 0;
-    if (subtotal > FREE_DELIVERY_THRESHOLD) {
-      delivery = 0;
-    } else if (currentDistance <= MAX_DISTANCE_KM) {
-      delivery = currentDistance <= 2 ? 10 : 20;
-    } else {
-      delivery = 0;
-    }
+   if (currentDistance <= MAX_DISTANCE_KM) {
+  delivery = currentDistance <= 2 ? 10 : 20;
+} else {
+  delivery = 0;
+}
     deliveryChargeSpan.innerText = delivery;
     finalTotalSpan.innerText = subtotal + delivery;
-    if (currentDistance > MAX_DISTANCE_KM && subtotal <= FREE_DELIVERY_THRESHOLD) {
-      deliveryWarningBox.style.display = "flex";
-      sendBtn.disabled = true;
-    } else {
-      deliveryWarningBox.style.display = "none";
-      sendBtn.disabled = false;
-    }
+  if (currentDistance > MAX_DISTANCE_KM) {
+
+  deliveryWarningBox.style.display = "flex";
+
+  sendBtn.disabled = true;
+
+} else {
+
+  deliveryWarningBox.style.display = "none";
+
+  sendBtn.disabled = false;
+
+}
     renderOrderSummary();
   }, () => showToast("Location permission denied"));
 }
@@ -1086,12 +1272,28 @@ visionModal.classList.add('open');  });
   const installBtn = document.getElementById('installAppBtn');
   const closeInstallBanner = document.getElementById('closeInstallBanner');
 
-  window.addEventListener('beforeinstallprompt', (e) => {
-    console.log('📲 beforeinstallprompt fired');
-    e.preventDefault();
-    deferredPrompt = e;
-    if (installBanner) installBanner.style.display = 'flex';
-  });
+ window.addEventListener('beforeinstallprompt', (e) => {
+
+  // If already opened as installed app, don't show banner
+  if (isRunningAsApp()) {
+    return;
+  }
+  // Hide install banner if already installed app
+if (isRunningAsApp()) {
+  if (installBanner) {
+    installBanner.style.display = 'none';
+  }
+}
+  console.log('📲 beforeinstallprompt fired');
+
+  e.preventDefault();
+
+  deferredPrompt = e;
+
+  if (installBanner) {
+    installBanner.style.display = 'flex';
+  }
+});
 
   if (installBtn) {
     installBtn.addEventListener('click', async () => {
