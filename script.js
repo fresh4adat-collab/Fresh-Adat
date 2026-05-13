@@ -567,7 +567,14 @@ function renderCart() {
   });
 }
 
-function openCart() { cartOverlay.classList.add('open'); cartPanel.classList.add('open'); renderCart(); }
+function openCart() {
+  pushPageState('cart');
+
+  cartOverlay.classList.add('open');
+  cartPanel.classList.add('open');
+
+  renderCart();
+}
 function closeCart() { cartOverlay.classList.remove('open'); cartPanel.classList.remove('open'); }
 
 // Delivery & free shipping
@@ -683,7 +690,8 @@ function loadFormFromLocalStorage() {
 function openOrderModal() {
   if (Object.keys(cart).length === 0) { showToast("Cart is empty"); return; }
   closeCart();
-  modalOverlay.classList.add('show');
+  pushPageState('order');
+modalOverlay.classList.add('show');
   renderOrderSummary();
   distanceSpan.innerText = "0 km";
   deliveryChargeSpan.innerText = "0";
@@ -824,7 +832,8 @@ function openCategoriesModal() {
     let imgUrl = getImageUrl(key);
     return `<div class="category-item" data-category="${cat}"><img class="category-image" src="${imgUrl}" alt="${cat}" loading="lazy"><span class="category-name">${cat}</span></div>`;
   }).join('');
-  categoriesModal.classList.add('open');
+  pushPageState('categories');
+categoriesModal.classList.add('open');
   document.querySelectorAll('.category-item').forEach(item => {
     item.addEventListener('click', () => {
       selectedCat = item.dataset.category;
@@ -906,31 +915,75 @@ function loadData() {
   });
 }
 
-// ========== ENHANCED BACK BUTTON HANDLER (prevents app close) ==========
+// ========== MOBILE BACK BUTTON NAVIGATION ==========
+
+// Add one initial history state
+window.addEventListener('load', () => {
+  history.replaceState({ page: 'home' }, '', location.href);
+});
+
 function resetToHome() {
-  // Close all open UI elements
+
+  // Close cart
   closeCart();
+
+  // Close order modal
   closeOrderModal();
+
+  // Close categories modal
   closeCategoriesModal();
+
+  // Close vision modal
   const visionModal = document.getElementById('visionModal');
-  if (visionModal && visionModal.classList.contains('open')) visionModal.classList.remove('open');
-  
-  // Reset all state variables
+  if (visionModal) {
+    visionModal.classList.remove('open');
+  }
+
+  // Reset category + search
   selectedCat = 'All';
   searchTerm = '';
   selectedSuggestionProduct = null;
-  
-  // Clear search inputs
-  if (desktopSearch) desktopSearch.value = '';
-  if (mobileSearch) mobileSearch.value = '';
-  if (desktopSuggestions) desktopSuggestions.classList.remove('active');
-  if (mobileSuggestions) mobileSuggestions.classList.remove('active');
+
+  // Clear desktop search
+  if (desktopSearch) {
+    desktopSearch.value = '';
+  }
+
+  // Clear mobile search
+  if (mobileSearch) {
+    mobileSearch.value = '';
+  }
+
+  // Hide suggestions
+  if (desktopSuggestions) {
+    desktopSuggestions.classList.remove('active');
+  }
+
+  if (mobileSuggestions) {
+    mobileSuggestions.classList.remove('active');
+  }
+
   updateClearButtons();
-  
-  // Re-render home page
+
+  // Re-render homepage
   renderCategories();
   renderProducts();
 }
+
+// Whenever user opens something important,
+// push a history state
+
+function pushPageState(pageName) {
+  history.pushState({ page: pageName }, '', '#'+pageName);
+}
+
+// Handle browser/mobile back button
+window.addEventListener('popstate', (event) => {
+
+  // Always go back to home UI
+  resetToHome();
+
+});
 
 // Ensure we always have at least one "home" state to go back to
 // This prevents the app from closing when back is pressed
@@ -1016,7 +1069,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const visionLink = document.getElementById('visionLink');
   const closeVisionBtn = document.getElementById('closeVisionModal');
   if (visionLink && visionModal) {
-    visionLink.addEventListener('click', (e) => { e.preventDefault(); visionModal.classList.add('open'); });
+    visionLink.addEventListener('click', (e) => { e.preventDefault();pushPageState('vision');
+visionModal.classList.add('open');  });
   }
   if (closeVisionBtn && visionModal) {
     closeVisionBtn.addEventListener('click', () => visionModal.classList.remove('open'));
