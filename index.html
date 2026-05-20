@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
   <link rel="icon" type="image/png" href="logo.png">
-  <!-- PWA Manifest -->
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#1a6b3c">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12,7 +11,6 @@
   <meta name="apple-mobile-web-app-title" content="Fresh Adat">
   <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
 
-  <!-- SEO Meta Tags -->
   <title>Fresh Adat – Online Grocery Delivery | Fresh Vegetables, Fruits & Organic</title>
   <meta name="description" content="Fresh Adat delivers fresh vegetables, fruits, organic produce, dairy, meats, and more to your door. Order online for fast grocery delivery in your area.">
   <meta name="keywords" content="Fresh Adat, online grocery, fresh vegetables, organic fruits, grocery delivery, Adat grocery">
@@ -23,7 +21,6 @@
   <meta name="geo.region" content="IN-KL">
   <meta name="geo.placename" content="Thrissur">
 
-  <!-- Open Graph / Social Media -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://www.freshadat.store/">
   <meta property="og:title" content="Fresh Adat – Fresh Organic Grocery Delivered">
@@ -34,31 +31,26 @@
   <meta property="og:site_name" content="Fresh Adat">
   <meta property="og:locale" content="en_IN">
 
-  <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Fresh Adat – Online Grocery Delivery">
   <meta name="twitter:description" content="Fresh vegetables, fruits, organic groceries delivered to your doorstep.">
   <meta name="twitter:image" content="https://www.freshadat.store/icons/icon-512x512.png">
 
-  <!-- Favicon -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png">
 
-  <!-- Preconnect for performance -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 
-  <!-- Fonts & CSS -->
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- PWA Install Banner -->
-<div id="installBanner" style="display: none; position: fixed; bottom: 20px; left: 16px; right: 16px; background: #1a6b3c; color: white; border-radius: 16px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; z-index: 10002; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+<div id="installBanner" style="display:none; position: fixed; bottom: 20px; left: 16px; right: 16px; background: #1a6b3c; color: white; border-radius: 16px; padding: 12px 16px; justify-content: space-between; align-items: center; z-index: 10002; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
   <div style="display: flex; align-items: center; gap: 12px;">
     <i class="fas fa-download"></i>
     <span>Install Fresh Adat app for faster ordering</span>
@@ -125,38 +117,6 @@
   </div>
 </div>
 
-<!-- Order Modal -->
-<div id="modalOverlay">
-  <div id="modalBox">
-    <div class="modal-flex">
-      <div class="modal-left">
-        <h3><i class="fas fa-truck"></i> Delivery Details</h3>
-        <input id="custName" placeholder="Full name *">
-        <input id="custPhone" placeholder="Phone number *">
-        <textarea id="custAddress" placeholder="Complete address *"></textarea>
-        <button class="loc-btn" id="getLocationBtn"><i class="fas fa-location-dot"></i> Get current location & distance</button>
-        <input id="custLocation" placeholder="Location link (auto)" readonly>
-        <iframe id="mapFrame" style="width:100%; height:150px; border-radius:12px; display:none;"></iframe>
-        <input id="custNote" placeholder="Special instruction (optional)">
-      </div>
-      <div class="modal-right">
-        <h3><i class="fas fa-receipt"></i> Order Summary</h3>
-        <div id="orderSummary" class="summary-box"></div>
-        <div class="price-line"><span><i class="fas fa-road"></i> Distance</span><span id="distanceText">0 km</span></div>
-        <div class="price-line"><span><i class="fas fa-motorcycle"></i> Delivery</span><span>₹<span id="deliveryCharge">0</span></span></div>
-        <div class="price-total"><i class="fas fa-rupee-sign"></i> <strong>Total:</strong> ₹<span id="finalTotal">0</span></div>
-        <div id="deliveryWarningBox" class="delivery-warning" style="display:none;">
-          <i class="fas fa-exclamation-triangle"></i> <strong>Delivery not available beyond 5 km</strong><br>Please change address or contact store.
-        </div>
-        <div class="modal-buttons">
-          <button class="cancel-btn" id="cancelModalBtn">Cancel</button>
-          <button class="send-btn" id="sendWhatsAppBtn"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Categories Modal -->
 <div id="categoriesModal" class="categories-modal">
   <div class="categories-modal-content">
@@ -172,7 +132,7 @@
 <div id="visionModal" class="vision-modal">
   <div class="vision-modal-content">
     <div class="vision-modal-header">
-      <h3><i class="fas fa-eye"></i> Our Vision & Impact</h3>
+      <h3><i class="fas fa-eye"></i> Our Vision &amp; Impact</h3>
       <button class="close-vision-modal" id="closeVisionModal">&times;</button>
     </div>
     <div class="vision-modal-body">
@@ -191,7 +151,7 @@
     </div>
     <div class="footer-links">
       <a href="#" id="visionLink" class="vision-link">
-        <i class="fas fa-eye"></i> Our Vision & Impact
+        <i class="fas fa-eye"></i> Our Vision &amp; Impact
       </a>
     </div>
     <div class="developer-credit">
@@ -200,46 +160,117 @@
   </div>
 </footer>
 
+<!-- Sticky Cart Bar -->
+<div id="stickyCartBar" class="sticky-cart-bar" style="display: none;">
+  <div class="sticky-cart-main">
+    <div class="sticky-cart-summary">
+      <div class="sticky-cart-info">
+        <span class="sticky-cart-items"><i class="fas fa-shopping-cart"></i> <span id="stickyCartCount">0</span> item(s)</span>
+        <span class="sticky-cart-savings" id="stickyCartSavings">Saved: ₹0</span>
+        <span class="sticky-cart-free" id="stickyFreeBadge" style="display: none;">🎉 Free Delivery Unlocked</span>
+      </div>
+      <div class="sticky-cart-actions">
+        <button id="stickyCartToggleBtn" class="sticky-toggle-btn">
+          <i class="fas fa-chevron-up"></i>
+        </button>
+        <button id="stickyCartBtn" class="sticky-cart-btn">Go to Cart <i class="fas fa-arrow-right"></i></button>
+      </div>
+    </div>
+    <div id="stickyCartDetailed" class="sticky-cart-detailed" style="display: none;">
+      <div class="sticky-cart-products-list" id="stickyCartProductsList"></div>
+      <div class="sticky-cart-detailed-footer">
+        <div class="sticky-detailed-total">
+          <span>Total items: <span id="stickyDetailedItems">0</span></span>
+          <span>Total savings: <span id="stickyDetailedSavings">₹0</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
-<!-- JSON-LD Structured Data (Local Grocery Business) -->
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "GroceryStore",
-  "name": "Fresh Adat",
-  "url": "https://www.freshadat.store/",
-  "logo": "https://www.freshadat.store/icons/icon-512x512.png",
-  "image": "https://www.freshadat.store/icons/icon-512x512.png",
-  "description": "Fresh organic vegetables, fruits, dairy, meats, and groceries delivered to your doorstep.",
-  "address": {
-    "@type": "PostalAddress",
-    "streetAddress": "Your Street Address",
-    "addressLocality": "Thrissur",
-    "addressRegion": "KL",
-    "postalCode": "680001",
-    "addressCountry": "IN"
-  },
-  "geo": {
-    "@type": "GeoCoordinates",
-    "latitude": 10.5530,
-    "longitude": 76.1668
-  },
-  "telephone": "+919496840336",
-  "email": "contact@freshadat.store",
-  "priceRange": "₹",
-  "openingHours": ["Mo-Su 08:00-21:00"],
-  "sameAs": [
-    "https://www.instagram.com/freshadat",
-    "https://www.facebook.com/freshadat"
-  ],
-  "paymentAccepted": ["Cash on Delivery", "Google Pay", "PhonePe", "Paytm"],
-  "deliveryArea": {
-    "@type": "ServiceArea",
-    "name": "Adat and surrounding areas within 5 km radius"
-  }
-}
-</script>
+<!-- Full‑screen Address Modal (updated) -->
+<div id="addressFlowModal" class="address-flow-modal fullscreen-modal" style="display: none;">
+  <div class="address-flow-container">
+    <div class="address-flow-header">
+      <button class="back-arrow-btn" id="backArrowBtn"><i class="fas fa-arrow-left"></i></button>
+      <h3>Delivery Details</h3>
+      <button class="close-address-flow" id="closeAddressFlow">&times;</button>
+    </div>
+    <div class="address-flow-steps">
+      <!-- Step indicator -->
+      <div class="step-indicator" id="stepIndicator">
+        <span class="step active" data-step="1">📍 Location</span>
+        <span class="step" data-step="2">🏠 Address</span>
+        <span class="step" data-step="3">👤 Personal</span>
+        <span class="step" data-step="4">✅ Confirm</span>
+      </div>
+
+      <!-- Saved address summary card -->
+      <div id="savedSummaryCard" class="saved-summary-card" style="display: none;">
+        <div class="summary-card-header">
+          <i class="fas fa-check-circle"></i>
+          <span>Saved Address</span>
+        </div>
+        <div class="summary-card-details" id="savedSummaryDetails"></div>
+        <div class="summary-card-buttons">
+          <button id="editAddressBtn" class="edit-address-btn"><i class="fas fa-pen"></i> Edit Details</button>
+          <button id="sendFromSummaryBtn" class="send-from-summary-btn"><i class="fab fa-whatsapp"></i> Send Order via WhatsApp</button>
+        </div>
+      </div>
+
+      <!-- Multi-step content -->
+      <div id="multiStepContent" style="display: none;">
+        <div class="step-content" id="step1Content">
+          <div class="eco-message">✅ Delivered in reusable eco‑boxes<br>♻️ Please return the empty box after delivery</div>
+          <div id="locationMap" style="height: 300px; width: 100%; border-radius: 16px; margin: 16px 0;"></div>
+          <p class="location-hint">Drag the marker to your exact delivery location (within 5 km of Adat).</p>
+          <button id="useMyLocationBtn" class="use-location-btn"><i class="fas fa-location-dot"></i> Use my current location</button>
+          <div class="selected-location" id="selectedLocationDisplay"></div>
+          <button id="confirmLocationBtn" class="next-step-btn" disabled>Confirm Location</button>
+        </div>
+        <div class="step-content" id="step2Content" style="display: none;">
+          <div class="eco-message">✅ Delivered in reusable eco‑boxes<br>♻️ Please return the empty box after delivery</div>
+          <input type="text" id="addrHouse" placeholder="House / Flat / Floor No. *" required>
+          <input type="text" id="addrArea" placeholder="Apartment / Road / Area (optional)">
+          <input type="text" id="addrLandmark" placeholder="Landmark, accidental info etc. (optional)">
+          <div class="address-type">
+            <label><input type="radio" name="addrType" value="Home" checked> 🏠 Home</label>
+            <label><input type="radio" name="addrType" value="Work"> 💼 Work</label>
+            <label><input type="radio" name="addrType" value="Other"> 📌 Other</label>
+          </div>
+          <div class="eco-box-toggle">
+            <label>
+              <input type="checkbox" id="ecoBoxCheckbox"> ♻️ Use eco‑box (+₹10)
+            </label>
+            <span class="eco-info">We deliver in reusable boxes. Return the empty box after delivery.</span>
+          </div>
+          <button id="nextToPersonalBtn" class="next-step-btn">Next →</button>
+        </div>
+        <div class="step-content" id="step3Content" style="display: none;">
+          <input type="text" id="custFullName" placeholder="Full name *" required>
+          <input type="tel" id="custPhoneNumber" placeholder="Phone number *" required>
+          <div class="saved-address-preview" id="savedAddressPreview"></div>
+          <button id="nextToConfirmBtn" class="next-step-btn">Next →</button>
+        </div>
+        <div class="step-content" id="step4Content" style="display: none;">
+          <div class="confirm-details">
+            <h4>Delivery Address</h4>
+            <p id="confirmAddress"></p>
+            <h4>Customer</h4>
+            <p id="confirmCustomer"></p>
+            <h4>Order Summary</h4>
+            <div id="confirmOrderSummary"></div>
+            <div class="eco-box-charge" id="ecoBoxChargeLine" style="display: none;">+ Eco‑box charge: ₹10</div>
+            <div class="final-total" id="confirmFinalTotal"></div>
+          </div>
+          <button id="sendWhatsAppFinalBtn" class="send-order-btn"><i class="fab fa-whatsapp"></i> Send WhatsApp Order</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="script.js"></script>
 </body>
