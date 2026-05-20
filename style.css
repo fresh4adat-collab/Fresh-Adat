@@ -2272,3 +2272,53 @@ main {
     flex-direction: column;
   }
 }
+/* Make Confirm Location button highly visible */
+.next-step-btn {
+  background: linear-gradient(135deg, #f47c2b 0%, #e0671a 100%);
+  color: white;
+  border: none;
+  border-radius: 60px;
+  padding: 16px 24px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 20px;
+  transition: all 0.3s ease;
+  box-shadow: 0 8px 20px rgba(244,124,43,0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Pulse animation to draw attention */
+@keyframes gentlePulse {
+  0% { transform: scale(1); box-shadow: 0 8px 20px rgba(244,124,43,0.4); }
+  50% { transform: scale(1.02); box-shadow: 0 12px 28px rgba(244,124,43,0.6); }
+  100% { transform: scale(1); box-shadow: 0 8px 20px rgba(244,124,43,0.4); }
+}
+
+.next-step-btn:not(:disabled) {
+  animation: gentlePulse 1.5s infinite ease-in-out;
+}
+
+.next-step-btn:hover:not(:disabled) {
+  transform: scale(1.02);
+  background: linear-gradient(135deg, #e0671a 0%, #c4550a 100%);
+  box-shadow: 0 12px 28px rgba(244,124,43,0.5);
+}
+
+.next-step-btn:disabled {
+  background: #cbd5e1;
+  box-shadow: none;
+  animation: none;
+  cursor: not-allowed;
+  transform: none;
+  color: #ffffffaa;
+}
+
+/* Add an icon to the button for extra visibility */
+#confirmLocationBtn::before {
+  content: "📍 ";
+  font-size: 1.2rem;
+}

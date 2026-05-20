@@ -81,7 +81,7 @@ function getImageUrl(key) {
 function showToast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.add('show');
-  setTimeout(() => toastEl.classList.remove('show'), 2000);
+  setTimeout(() => toastEl.classList.remove('show'), 3000);
 }
 
 function updateCartCountUI() {
@@ -106,6 +106,12 @@ function adjustQuantity(productId, delta) {
   updateStickyCartBar();
   if (delta > 0 && newQty <= MAX_QTY_PER_PRODUCT) showToast('Added to cart');
   else if (delta < 0) showToast('Removed');
+  
+  // FIX: Close PWA install banner when user adds product
+  const installBanner = document.getElementById('installBanner');
+  if (installBanner && installBanner.style.display === 'flex') {
+    installBanner.style.display = 'none';
+  }
 }
 
 function getProductImageUrl(product) {
@@ -717,7 +723,7 @@ function closeCart() {
   }
 }
 
-// ========== ADDRESS FLOW (UPDATED with GPS & WhatsApp button) ==========
+// ========== ADDRESS FLOW (UPDATED with auto-scroll to button) ==========
 function getCartSubtotal() {
   let subtotal = 0;
   Object.keys(cart).forEach(id => {
@@ -727,6 +733,16 @@ function getCartSubtotal() {
     subtotal += price * qty;
   });
   return subtotal;
+}
+
+// Helper: scroll to Confirm Location button smoothly
+function scrollToConfirmButton() {
+  const btn = document.getElementById('confirmLocationBtn');
+  if (btn && !btn.disabled) {
+    setTimeout(() => {
+      btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 200);
+  }
 }
 
 function initMap() {
@@ -771,18 +787,21 @@ function createMap() {
         document.getElementById('selectedLocationDisplay').innerHTML = `<strong>Selected location:</strong> ${address}`;
         customerData.location = { lat: pos.lat, lng: pos.lng, address: address };
         document.getElementById('confirmLocationBtn').disabled = false;
+        scrollToConfirmButton();
       } catch (err) {
         document.getElementById('selectedLocationDisplay').innerHTML = `<strong>Selected location:</strong> ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
         customerData.location = { lat: pos.lat, lng: pos.lng, address: `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}` };
         document.getElementById('confirmLocationBtn').disabled = false;
+        scrollToConfirmButton();
       }
     } else {
       currentLocationValid = false;
-      document.getElementById('selectedLocationDisplay').innerHTML = '<span style="color: red;">❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.</span>';
+      // Show temporary warning instead of permanent text
+      showToast("❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.");
+      document.getElementById('selectedLocationDisplay').innerHTML = '';
       document.getElementById('confirmLocationBtn').disabled = true;
     }
   });
-  // Attempt to get current location after map loads
   attemptAutoLocation();
 }
 
@@ -796,7 +815,7 @@ function attemptAutoLocation() {
         if (distance <= MAX_DISTANCE_KM) {
           map.setView([userLat, userLng], 15);
           marker.setLatLng([userLat, userLng]);
-          marker.fire('dragend'); // triggers reverse geocode
+          marker.fire('dragend');
           showToast("📍 Location set to your current position");
         } else {
           showToast("📍 Your location is outside delivery area. Please drag marker inside the circle.");
@@ -825,15 +844,15 @@ function useCurrentLocation() {
           marker.setLatLng([userLat, userLng]);
           marker.fire('dragend');
         } else {
-          alert("❌ Your location is outside our 5 km delivery area. Please drag the marker inside the circle.");
+          showToast("❌ Your location is outside our 5 km delivery area. Please drag the marker inside the circle.");
         }
       },
       (error) => {
-        alert("Unable to get your location. Please drag the marker manually.");
+        showToast("Unable to get your location. Please drag the marker manually.");
       }
     );
   } else {
-    alert("Geolocation is not supported by your browser.");
+    showToast("Geolocation is not supported by your browser.");
   }
 }
 
@@ -956,10 +975,6 @@ function closeAddressFlow() {
   addressFlowModal.style.display = 'none';
 }
 
-function resetToMultiStep() {
-  startMultiStepFlow();
-}
-
 function handleBack() {
   if (document.getElementById('savedSummaryCard').style.display === 'block') {
     closeAddressFlow();
@@ -1012,13 +1027,13 @@ function initAddressFlow() {
     if (currentLocationValid) {
       showStep(2);
     } else {
-      alert('Please select a location within 5 km delivery area.');
+      showToast('Please select a location within 5 km delivery area.');
     }
   });
   document.getElementById('nextToPersonalBtn').addEventListener('click', () => {
     customerData.house = document.getElementById('addrHouse').value.trim();
     if (!customerData.house) {
-      alert('Please enter house/flat/floor number');
+      showToast('Please enter house/flat/floor number');
       return;
     }
     customerData.area = document.getElementById('addrArea').value.trim();
@@ -1032,7 +1047,7 @@ function initAddressFlow() {
     const name = document.getElementById('custFullName').value.trim();
     const phone = document.getElementById('custPhoneNumber').value.trim();
     if (!name || !phone) {
-      alert('Please enter your full name and phone number');
+      showToast('Please enter your full name and phone number');
       return;
     }
     customerData.name = name;
