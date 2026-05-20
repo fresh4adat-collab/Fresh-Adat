@@ -1001,11 +1001,11 @@ function sendFinalWhatsApp() {
     const p = products.find(x => x.id == id);
     const qty = cart[id];
     const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    itemsList += `  • ${p.name} × ${qty} ${p.unit} = ₹${price * qty}\n`;
+    itemsList += `  - ${p.name} x ${qty} ${p.unit} = Rs.${price * qty}\n`;
   });
-  const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: ₹${ECO_BOX_CHARGE}\n` : '';
+  const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: Rs.${ECO_BOX_CHARGE}\n` : '';
   const orderId = 'ORD' + Date.now().toString().slice(-6);
-  const msg = `🌿 *FRESH ADAT ORDER*\n━━━━━━━━━━━━━━\n🆔 Order: ${orderId}\n👤 ${customerData.name} | ${customerData.phone}\n📍 ${fullAddress}\n🏠 Type: ${customerData.addressType}\n🗺️ ${customerData.location.address}\n\n🛒 Items:\n${itemsList}${ecoLine}💰 SUBTOTAL: ₹${subtotal}\n💰 TOTAL: ₹${total}\n✅ Delivered in reusable eco‑box\n♻️ Please return the empty box after delivery\n📝 Note: Thank you for ordering!`;
+  const msg = `*FRESH ADAT ORDER*\n----------------------------\nOrder ID: ${orderId}\nCustomer: ${customerData.name} (${customerData.phone})\nDelivery: ${fullAddress}\nAddress type: ${customerData.addressType}\n\nItems:\n${itemsList}${ecoLine}Subtotal: Rs.${subtotal}\nTotal: Rs.${total}\n\n✅ Delivered in reusable eco-box\n♻️ Please return the empty box after delivery\nThank you for ordering!`;
   window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   cart = {};
   updateCartCountUI();
