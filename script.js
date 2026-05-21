@@ -1014,10 +1014,21 @@ function openAddressFlow() {
   addressFlowModal.style.display = 'flex';
   const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location.lat;
   if (hasSavedData) {
-    showSavedSummary();
+
+  const useSaved = confirm(
+    `Use saved delivery address for ${customerData.name}?`
+  );
+
+  if (useSaved) {
+    sendFinalWhatsApp();
+    return;
   } else {
     startMultiStepFlow();
   }
+
+} else {
+  startMultiStepFlow();
+}
 }
 
 function closeAddressFlow() {
@@ -1041,6 +1052,7 @@ function sendOrderFromSummary() {
 }
 
 function sendFinalWhatsApp() {
+  saveCustomerData();
   const subtotal = getCartSubtotal();
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + ecoCharge;
@@ -1103,7 +1115,6 @@ function initAddressFlow() {
     }
     customerData.name = name;
     customerData.phone = phone;
-    saveCustomerData();
     showStep(4);
   });
   document.getElementById('sendWhatsAppFinalBtn').addEventListener('click', sendFinalWhatsApp);
