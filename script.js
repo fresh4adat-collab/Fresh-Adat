@@ -896,24 +896,39 @@ function showStep(step) {
 }
 
 function loadSavedCustomerData() {
+
   const saved = localStorage.getItem('freshAdat_customer');
+
   if (saved) {
+
     try {
+
       const data = JSON.parse(saved);
+
       if (data.name) customerData.name = data.name;
       if (data.phone) customerData.phone = data.phone;
-      if (data.address && data.location) {
+
+      if (data.house && data.location) {
+
         customerData.house = data.house || '';
         customerData.area = data.area || '';
         customerData.landmark = data.landmark || '';
         customerData.addressType = data.addressType || 'Home';
-        customerData.location = data.location || { lat: ADAT_LAT, lng: ADAT_LON, address: 'Adat, Kerala, India' };
+
+        customerData.location = data.location || {
+          lat: ADAT_LAT,
+          lng: ADAT_LON,
+          address: 'Adat, Kerala, India'
+        };
+
         customerData.useEcoBox = data.useEcoBox || false;
       }
-    } catch(e) {}
+
+    } catch(e) {
+      console.log(e);
+    }
   }
 }
-
 function saveCustomerData() {
   const toSave = {
     name: customerData.name,
@@ -1013,21 +1028,14 @@ function openAddressFlow() {
   loadSavedCustomerData();
   addressFlowModal.style.display = 'flex';
   const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location.lat;
-  if (hasSavedData) {
+ if (hasSavedData) {
 
-  const useSaved = confirm(
-    `Use saved delivery address for ${customerData.name}?`
-  );
-
-  if (useSaved) {
-    sendFinalWhatsApp();
-    return;
-  } else {
-    startMultiStepFlow();
-  }
+  showSavedSummary();
 
 } else {
+
   startMultiStepFlow();
+
 }
 }
 
