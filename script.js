@@ -107,7 +107,7 @@ function adjustQuantity(productId, delta) {
   if (delta > 0 && newQty <= MAX_QTY_PER_PRODUCT) showToast('Added to cart');
   else if (delta < 0) showToast('Removed');
   
-  // FIX: Close PWA install banner when user adds product
+  // Close PWA install banner when user adds product
   const installBanner = document.getElementById('installBanner');
   if (installBanner && installBanner.style.display === 'flex') {
     installBanner.style.display = 'none';
@@ -723,7 +723,7 @@ function closeCart() {
   }
 }
 
-// ========== ADDRESS FLOW (UPDATED with auto-scroll to button) ==========
+// ========== ADDRESS FLOW (ENHANCED) ==========
 function getCartSubtotal() {
   let subtotal = 0;
   Object.keys(cart).forEach(id => {
@@ -733,6 +733,18 @@ function getCartSubtotal() {
     subtotal += price * qty;
   });
   return subtotal;
+}
+
+function getCartTotalSavings() {
+  let savings = 0;
+  Object.keys(cart).forEach(id => {
+    const p = products.find(x => x.id == id);
+    const qty = cart[id];
+    const originalPrice = p.price;
+    const effectivePrice = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
+    savings += (originalPrice - effectivePrice) * qty;
+  });
+  return savings;
 }
 
 // Helper: scroll to Confirm Location button smoothly
@@ -796,7 +808,6 @@ function createMap() {
       }
     } else {
       currentLocationValid = false;
-      // Show temporary warning instead of permanent text
       showToast("❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.");
       document.getElementById('selectedLocationDisplay').innerHTML = '';
       document.getElementById('confirmLocationBtn').disabled = true;
@@ -897,6 +908,7 @@ function loadSavedCustomerData() {
         customerData.landmark = data.landmark || '';
         customerData.addressType = data.addressType || 'Home';
         customerData.location = data.location || { lat: ADAT_LAT, lng: ADAT_LON, address: 'Adat, Kerala, India' };
+        customerData.useEcoBox = data.useEcoBox || false;
       }
     } catch(e) {}
   }
@@ -916,17 +928,54 @@ function saveCustomerData() {
   localStorage.setItem('freshAdat_customer', JSON.stringify(toSave));
 }
 
+// Enhanced saved summary with order details and map link
 function showSavedSummary() {
   document.getElementById('stepIndicator').style.display = 'none';
   document.getElementById('multiStepContent').style.display = 'none';
   document.getElementById('savedSummaryCard').style.display = 'block';
+  
   const fullAddr = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
+  const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
+  
+  // Build order summary HTML
+  const subtotal = getCartSubtotal();
+  const totalSavings = getCartTotalSavings();
+  const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
+  const total = subtotal + ecoCharge;
+  
+  let itemsHtml = '';
+  Object.keys(cart).forEach(id => {
+    const p = products.find(x => x.id == id);
+    const qty = cart[id];
+    const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
+    itemsHtml += `<div class="order-summary-item">${p.name} ×${qty} = ₹${price * qty}</div>`;
+  });
+  
   const summaryHtml = `
-    <p><strong>📍 Address:</strong> ${escapeHtml(fullAddr)}</p>
-    <p><strong>🏷️ Type:</strong> ${customerData.addressType}</p>
-    <p><strong>👤 Name:</strong> ${escapeHtml(customerData.name)}</p>
-    <p><strong>📞 Phone:</strong> ${customerData.phone}</p>
-    <p><strong>♻️ Eco‑box:</strong> ${customerData.useEcoBox ? 'Yes (+₹10)' : 'No'}</p>
+    <div class="saved-address-section">
+      <h4><i class="fas fa-map-marker-alt"></i> Delivery Address</h4>
+      <p><strong>📍 Address:</strong> ${escapeHtml(fullAddr)}</p>
+      <p><strong>🏷️ Type:</strong> ${customerData.addressType}</p>
+      <p><strong>🗺️ <a href="${mapLink}" target="_blank">View on Google Maps</a></strong></p>
+    </div>
+    <div class="saved-customer-section">
+      <h4><i class="fas fa-user"></i> Customer Details</h4>
+      <p><strong>👤 Name:</strong> ${escapeHtml(customerData.name)}</p>
+      <p><strong>📞 Phone:</strong> ${customerData.phone}</p>
+    </div>
+    <div class="order-summary-section">
+      <h4><i class="fas fa-shopping-cart"></i> Order Summary</h4>
+      <div class="order-items">${itemsHtml}</div>
+      <div class="order-totals">
+        <div>Subtotal: ₹${subtotal}</div>
+        ${totalSavings > 0 ? `<div>Savings: -₹${totalSavings}</div>` : ''}
+        ${customerData.useEcoBox ? `<div>Eco-box: +₹${ECO_BOX_CHARGE}</div>` : ''}
+        <div class="total"><strong>Total: ₹${total}</strong></div>
+      </div>
+    </div>
+    <div class="eco-message-summary">
+      ✅ Delivered in reusable eco‑box<br>♻️ Please return the empty box after delivery
+    </div>
   `;
   document.getElementById('savedSummaryDetails').innerHTML = summaryHtml;
 }
@@ -996,16 +1045,18 @@ function sendFinalWhatsApp() {
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + ecoCharge;
   const fullAddress = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
+  const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
+  
   let itemsList = '';
   Object.keys(cart).forEach(id => {
     const p = products.find(x => x.id == id);
     const qty = cart[id];
     const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    itemsList += `  - ${p.name} x ${qty} ${p.unit} = Rs.${price * qty}\n`;
+    itemsList += `  🛒 ${p.name} x ${qty} ${p.unit} = ₹${price * qty}\n`;
   });
-  const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: Rs.${ECO_BOX_CHARGE}\n` : '';
+  const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: ₹${ECO_BOX_CHARGE}\n` : '';
   const orderId = 'ORD' + Date.now().toString().slice(-6);
-  const msg = `*FRESH ADAT ORDER*\n----------------------------\nOrder ID: ${orderId}\nCustomer: ${customerData.name} (${customerData.phone})\nDelivery: ${fullAddress}\nAddress type: ${customerData.addressType}\n\nItems:\n${itemsList}${ecoLine}Subtotal: Rs.${subtotal}\nTotal: Rs.${total}\n\n✅ Delivered in reusable eco-box\n♻️ Please return the empty box after delivery\nThank you for ordering!`;
+  const msg = `🌿 *FRESH ADAT ORDER* 🌿\n━━━━━━━━━━━━━━━━━━\n🆔 Order ID: ${orderId}\n👤 Customer: ${customerData.name}\n📞 Phone: ${customerData.phone}\n📍 Address: ${fullAddress}\n🏷️ Type: ${customerData.addressType}\n🗺️ Map: ${mapLink}\n\n🛍️ *Items:*\n${itemsList}${ecoLine}💰 Subtotal: ₹${subtotal}\n💵 Total: ₹${total}\n\n✅ Delivered in reusable eco‑box\n♻️ Please return the empty box after delivery\n📝 Note: Thank you for ordering with Fresh Adat!`;
   window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   cart = {};
   updateCartCountUI();
