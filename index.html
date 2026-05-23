@@ -50,6 +50,7 @@
 </head>
 <body>
 
+<!-- PWA Install Banner -->
 <div id="installBanner" style="display:none; position: fixed; bottom: 20px; left: 16px; right: 16px; background: #1a6b3c; color: white; border-radius: 16px; padding: 12px 16px; justify-content: space-between; align-items: center; z-index: 10002; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
   <div style="display: flex; align-items: center; gap: 12px;">
     <i class="fas fa-download"></i>
@@ -92,6 +93,16 @@
     <div class="cat-row" id="catRow"></div>
     <button class="arrow-more-btn" id="arrowMoreBtn"><i class="fas fa-chevron-right"></i></button>
   </div>
+
+  <!-- Offers Teaser Row (home page only) -->
+  <div class="offers-teaser-section" id="offersTeaserSection" style="display: none;">
+    <div class="offers-teaser-header">
+      <h3><i class="fas fa-tag"></i> Offers for you</h3>
+      <span class="offers-countdown" id="homeOffersTimer"></span>
+    </div>
+    <div class="offers-teaser-scroll" id="offersTeaserScroll"></div>
+  </div>
+
   <div class="products-grid" id="productsGrid"></div>
   <div class="home-carousel-section" id="homeCarouselSection" style="display: none;">
     <div class="carousel-header">
@@ -190,7 +201,7 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- Full‑screen Address Modal (updated) -->
+<!-- Full‑screen Address Modal -->
 <div id="addressFlowModal" class="address-flow-modal fullscreen-modal" style="display: none;">
   <div class="address-flow-container">
     <div class="address-flow-header">
@@ -199,15 +210,12 @@
       <button class="close-address-flow" id="closeAddressFlow">&times;</button>
     </div>
     <div class="address-flow-steps">
-      <!-- Step indicator -->
       <div class="step-indicator" id="stepIndicator">
         <span class="step active" data-step="1">📍 Location</span>
         <span class="step" data-step="2">🏠 Address</span>
         <span class="step" data-step="3">👤 Personal</span>
         <span class="step" data-step="4">✅ Confirm</span>
       </div>
-
-      <!-- Saved address summary card -->
       <div id="savedSummaryCard" class="saved-summary-card" style="display: none;">
         <div class="summary-card-header">
           <i class="fas fa-check-circle"></i>
@@ -219,8 +227,6 @@
           <button id="sendFromSummaryBtn" class="send-from-summary-btn"><i class="fab fa-whatsapp"></i> Send Order via WhatsApp</button>
         </div>
       </div>
-
-      <!-- Multi-step content -->
       <div id="multiStepContent" style="display: none;">
         <div class="step-content" id="step1Content">
           <div class="eco-message">✅ Delivered in reusable eco‑boxes<br>♻️ Please return the empty box after delivery</div>
@@ -269,6 +275,46 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Offer Detail Modal -->
+<div id="offerDetailModal" class="offer-detail-modal" style="display: none;">
+  <div class="offer-detail-container">
+    <button class="close-offer-modal" id="closeOfferModal">&times;</button>
+    <div id="offerDetailContent"></div>
+    <button id="addOfferToCartBtn" class="add-offer-cart-btn">🛒 Add to Cart</button>
+  </div>
+</div>
+
+<!-- Account Modal (Full Screen) -->
+<div id="accountModal" class="account-modal" style="display: none;">
+  <div class="account-modal-container">
+    <div class="account-modal-header">
+      <h3><i class="fas fa-user-circle"></i> Account</h3>
+      <button class="close-account-modal" id="closeAccountModal">&times;</button>
+    </div>
+    <div class="account-modal-body" id="accountModalBody">
+      <!-- Dynamic content will be inserted here -->
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Navigation Bar -->
+<div id="bottomNavBar" class="bottom-nav-bar">
+  <div class="bottom-nav-inner">
+    <button class="bottom-nav-item" data-nav="home">
+      <i class="fas fa-home"></i>
+      <span>Home</span>
+    </button>
+    <button class="bottom-nav-item" data-nav="category">
+      <i class="fas fa-th-large"></i>
+      <span>Category</span>
+    </button>
+    <button class="bottom-nav-item" data-nav="account">
+      <i class="fas fa-user"></i>
+      <span>Account</span>
+    </button>
   </div>
 </div>
 

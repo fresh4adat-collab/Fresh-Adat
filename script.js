@@ -11,35 +11,31 @@ const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
 
 let products = [];
+let offers = [];
 let cart = {};
 let selectedCat = 'All';
 let searchTerm = '';
 let selectedSuggestionProduct = null;
 
-// DOM elements
 let productsGrid, catRow, cartCountSpan, cartOverlay, cartPanel, cartItems, cartFooter, footerItems, footerTotal;
 let toastEl;
 let categoriesModal, categoriesGrid, arrowMoreBtn;
 let desktopSearch, mobileSearch, desktopClearBtn, mobileClearBtn, desktopSuggestions, mobileSuggestions;
 let imageMap = {};
 
-// Sticky bar elements
 let stickyBar, stickyCountSpan, stickySavingsSpan, stickyFreeBadge, stickyCartBtn, stickyToggleBtn, stickyDetailedDiv;
 let stickyDetailedOpen = false;
 
-// Address flow state
 let customerData = {
-  name: '',
-  phone: '',
-  location: { lat: null, lng: null, address: '' },
-  house: '',
-  area: '',
-  landmark: '',
-  addressType: 'Home',
-  useEcoBox: false
+  name: '', phone: '', location: { lat: null, lng: null, address: '' },
+  house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false
 };
 let map, marker, circle, currentLocationValid = false;
 let addressFlowModal, currentStep = 1;
+
+let currentOffer = null;
+let offerTimerInterval = null;
+let homeTimerInterval = null;
 
 const FALLBACK_IMAGES = {
   slide1: 'https://via.placeholder.com/800x400?text=Slide+1',
@@ -79,6 +75,7 @@ function getImageUrl(key) {
 }
 
 function showToast(msg) {
+  if (!toastEl) return;
   toastEl.textContent = msg;
   toastEl.classList.add('show');
   setTimeout(() => toastEl.classList.remove('show'), 3000);
@@ -86,7 +83,7 @@ function showToast(msg) {
 
 function updateCartCountUI() {
   const total = Object.values(cart).reduce((a, b) => a + b, 0);
-  cartCountSpan.textContent = total;
+  if (cartCountSpan) cartCountSpan.textContent = total;
 }
 
 function adjustQuantity(productId, delta) {
@@ -106,12 +103,9 @@ function adjustQuantity(productId, delta) {
   updateStickyCartBar();
   if (delta > 0 && newQty <= MAX_QTY_PER_PRODUCT) showToast('Added to cart');
   else if (delta < 0) showToast('Removed');
-  
-  // Close PWA install banner when user adds product
+
   const installBanner = document.getElementById('installBanner');
-  if (installBanner && installBanner.style.display === 'flex') {
-    installBanner.style.display = 'none';
-  }
+  if (installBanner && installBanner.style.display === 'flex') installBanner.style.display = 'none';
 }
 
 function getProductImageUrl(product) {
@@ -190,8 +184,250 @@ function bindProductEvents(container = document) {
   });
 }
 
-// ========== HOMEPAGE LAYOUT (unchanged) ==========
+// ========== OFFERS TEASER (HOME PAGE ONLY) ==========
+function renderOffersTeaser() {
+  const teaserSection = document.getElementById('offersTeaserSection');
+  const scrollContainer = document.getElementById('offersTeaserScroll');
+  const timerSpan = document.getElementById('homeOffersTimer');
+  if (!teaserSection || !scrollContainer) return;
+
+  if (!offers.length) {
+    teaserSection.style.display = 'none';
+    return;
+  }
+  const teaserOffers = offers.filter(o => !o.isSlide);
+  if (!teaserOffers.length) {
+    teaserSection.style.display = 'none';
+    return;
+  }
+  teaserSection.style.display = 'block';
+
+  const validExpiries = teaserOffers.map(o => o.expiryDate).filter(d => d);
+  if (validExpiries.length && timerSpan) {
+    const earliest = new Date(Math.min(...validExpiries.map(d => new Date(d).getTime())));
+    if (homeTimerInterval) clearInterval(homeTimerInterval);
+    const expiry = earliest.getTime();
+    function updateHomeTimer() {
+      const now = new Date().getTime();
+      const dist = expiry - now;
+      if (dist < 0) {
+        timerSpan.innerHTML = "🎉 Expired";
+        if (homeTimerInterval) clearInterval(homeTimerInterval);
+        return;
+      }
+      const days = Math.floor(dist / 86400000);
+      const hours = Math.floor((dist % 86400000) / 3600000);
+      const mins = Math.floor((dist % 3600000) / 60000);
+      const secs = Math.floor((dist % 60000) / 1000);
+      timerSpan.innerHTML = `⏱️ ${days}d ${hours}h ${mins}m ${secs}s`;
+    }
+    updateHomeTimer();
+    homeTimerInterval = setInterval(updateHomeTimer, 1000);
+  } else if (timerSpan) {
+    timerSpan.style.display = 'none';
+  }
+
+  let html = '';
+  teaserOffers.forEach(offer => {
+    const imgUrl = offer.imageUrl || getImageUrl(offer.name);
+    html += `
+      <div class="offer-teaser-card" data-offer-id="${offer.id}">
+        <div class="offer-teaser-img">
+          <img src="${imgUrl}" alt="${offer.name}" loading="lazy">
+          <span class="offer-teaser-badge">${offer.discountPercent}</span>
+        </div>
+        <div class="offer-teaser-info">
+          <div class="offer-teaser-name">${escapeHtml(offer.name)}</div>
+          <div class="offer-teaser-unit">${offer.unit}</div>
+          <div class="offer-teaser-prices">
+            <span class="offer-teaser-old">₹${offer.oldPrice}</span>
+            <span class="offer-teaser-new">₹${offer.newPrice}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  scrollContainer.innerHTML = html;
+
+  document.querySelectorAll('.offer-teaser-card').forEach(card => {
+    card.addEventListener('click', () => {
+      selectedCat = 'Offers';
+      renderCategories();
+      renderProducts();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+}
+
+// ========== OFFERS PAGE ==========
+function renderOffersPage() {
+  productsGrid.classList.remove('block');
+  productsGrid.style.display = 'block';
+
+  if (!offers.length) {
+    productsGrid.innerHTML = `<div class="no-results" style="padding:40px;">✨ No offers available</div>`;
+    return;
+  }
+
+  const slideOffers = offers.filter(o => o.isSlide === true);
+  const cardOffers = offers.filter(o => !o.isSlide);
+
+  let html = '<div class="offers-page-container">';
+
+  if (slideOffers.length) {
+    let slidesHtml = `<div class="offers-page-slideshow">`;
+    slideOffers.forEach((offer, idx) => {
+      const hasImage = offer.slideImageUrl && offer.slideImageUrl.startsWith('http');
+      if (hasImage) {
+        slidesHtml += `<div class="offers-slide ${idx === 0 ? 'active' : ''}">
+                         <img src="${offer.slideImageUrl}" alt="${offer.name}">
+                       </div>`;
+      } else {
+        slidesHtml += `<div class="offers-slide text-banner ${idx === 0 ? 'active' : ''}" style="background: linear-gradient(135deg, #1a6b3c, #2d9e5f); color: white; text-align: center; padding: 40px 20px; border-radius: 20px;">
+                         <div class="text-banner-content">
+                           <div class="text-banner-title" style="font-size: 1.8rem; font-weight: 800;">🔥 LIMITED TIME OFFER!</div>
+                           <div class="text-banner-product" style="font-size: 2.5rem; font-weight: 900; margin: 10px 0;">${escapeHtml(offer.name)}</div>
+                           <div class="text-banner-price" style="font-size: 2rem; background: rgba(255,255,255,0.2); display: inline-block; padding: 8px 24px; border-radius: 60px;">₹${offer.newPrice}<span style="font-size: 1rem;"> / ${offer.unit}</span></div>
+                           <div class="text-banner-old" style="font-size: 1rem; text-decoration: line-through; opacity: 0.8; margin-top: 8px;">Was ₹${offer.oldPrice}</div>
+                           <div class="text-banner-discount" style="margin-top: 8px;">🔥 ${offer.discountPercent} OFF</div>
+                         </div>
+                       </div>`;
+      }
+    });
+    slidesHtml += `<div class="slide-dots">`;
+    slideOffers.forEach((_, idx) => {
+      slidesHtml += `<span class="slide-dot ${idx === 0 ? 'active' : ''}" data-slide="${idx}"></span>`;
+    });
+    slidesHtml += `</div></div>`;
+    html += slidesHtml;
+  }
+
+  if (cardOffers.length) {
+    html += `<div class="offers-page-grid">`;
+    cardOffers.forEach(offer => {
+      const fakeProduct = {
+        id: offer.productId || `offer_${offer.id}`,
+        name: offer.name,
+        unit: offer.unit,
+        price: offer.oldPrice,
+        discountPrice: offer.newPrice,
+        isOrganic: false,
+        category: 'offers',
+        imageUrl: offer.imageUrl,
+        tags: ''
+      };
+      html += createProductCard(fakeProduct, true);
+    });
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  productsGrid.innerHTML = html;
+  bindProductEvents(productsGrid);
+
+  if (slideOffers.length > 1) {
+    const slides = document.querySelectorAll('.offers-slide');
+    const dots = document.querySelectorAll('.slide-dot');
+    if (slides.length) {
+      let current = 0;
+      setInterval(() => {
+        slides[current].classList.remove('active');
+        dots[current].classList.remove('active');
+        current = (current + 1) % slides.length;
+        slides[current].classList.add('active');
+        dots[current].classList.add('active');
+      }, 4000);
+      dots.forEach((dot, i) => {
+        dot.addEventListener('click', () => {
+          slides[current].classList.remove('active');
+          dots[current].classList.remove('active');
+          current = i;
+          slides[current].classList.add('active');
+          dots[current].classList.add('active');
+        });
+      });
+    }
+  }
+}
+
+// ========== OFFER MODAL FUNCTIONS ==========
+function showOfferDetailModal(offer) {
+  currentOffer = offer;
+  const modal = document.getElementById('offerDetailModal');
+  const contentDiv = document.getElementById('offerDetailContent');
+
+  if (!modal || !contentDiv) {
+    console.error("Offer modal elements missing");
+    showToast("Cannot show offer details. Please refresh.");
+    return;
+  }
+
+  const imgUrl = offer.imageUrl || getImageUrl(offer.name);
+
+  let timerHtml = '';
+  if (offer.expiryDate) {
+    timerHtml = `<div class="offer-detail-timer">⏱️ Ends in: <span id="offerTimerDisplay"></span></div>`;
+  }
+
+  contentDiv.innerHTML = `
+    <img class="offer-detail-img" src="${imgUrl}" alt="${offer.name}">
+    <div class="offer-detail-name">${escapeHtml(offer.name)}</div>
+    <div class="offer-detail-unit">${offer.unit}</div>
+    <div class="offer-detail-prices">
+      <span class="offer-detail-old">₹${offer.oldPrice}</span>
+      <span class="offer-detail-new">₹${offer.newPrice}</span>
+    </div>
+    <div class="offer-detail-discount">🔥 ${offer.discountPercent}</div>
+    ${timerHtml}
+  `;
+
+  modal.style.display = 'flex';
+
+  if (offer.expiryDate) {
+    if (offerTimerInterval) clearInterval(offerTimerInterval);
+    const expiry = new Date(offer.expiryDate).getTime();
+    function updateTimer() {
+      const now = new Date().getTime();
+      const dist = expiry - now;
+      if (dist < 0) {
+        const timerSpan = document.getElementById('offerTimerDisplay');
+        if (timerSpan) timerSpan.innerText = "Expired";
+        if (offerTimerInterval) clearInterval(offerTimerInterval);
+        return;
+      }
+      const days = Math.floor(dist / 86400000);
+      const hours = Math.floor((dist % 86400000) / 3600000);
+      const mins = Math.floor((dist % 3600000) / 60000);
+      const secs = Math.floor((dist % 60000) / 1000);
+      const timerSpan = document.getElementById('offerTimerDisplay');
+      if (timerSpan) timerSpan.innerText = `${days}d ${hours}h ${mins}m ${secs}s`;
+    }
+    updateTimer();
+    offerTimerInterval = setInterval(updateTimer, 1000);
+  }
+}
+
+function closeOfferModal() {
+  const modal = document.getElementById('offerDetailModal');
+  if (modal) modal.style.display = 'none';
+  if (offerTimerInterval) clearInterval(offerTimerInterval);
+  currentOffer = null;
+}
+
+function addOfferToCart() {
+  if (currentOffer && currentOffer.productId) {
+    adjustQuantity(currentOffer.productId, 1);
+    closeOfferModal();
+  } else {
+    showToast("Product not found for this offer");
+  }
+}
+
+// ========== HOMEPAGE LAYOUT ==========
 function renderCustomHomeLayout() {
+  const teaserSection = document.getElementById('offersTeaserSection');
+  if (teaserSection) teaserSection.style.display = 'none';
+  
   productsGrid.classList.add('block');
   productsGrid.style.display = 'block';
   const sortedAll = [...products].sort((a,b) => getHomeOrderNumber(a.showOnHomeRaw) - getHomeOrderNumber(b.showOnHomeRaw));
@@ -210,6 +446,7 @@ function renderCustomHomeLayout() {
   initSlideshow();
   attachCategorySquareEvents();
   renderHomeCarousel(nextTen);
+  renderOffersTeaser();
 }
 
 function initSlideshow() {
@@ -273,6 +510,9 @@ function renderHomeCarousel(productsToShow = null) {
 }
 
 function renderSuggestionBasedResults(selectedProduct) {
+  const teaserSection = document.getElementById('offersTeaserSection');
+  if (teaserSection) teaserSection.style.display = 'none';
+  
   const homeCarouselSection = document.getElementById('homeCarouselSection');
   if (homeCarouselSection) homeCarouselSection.style.display = 'none';
   productsGrid.classList.add('block');
@@ -319,6 +559,9 @@ function renderSuggestionBasedResults(selectedProduct) {
 }
 
 function renderSearchResults() {
+  const teaserSection = document.getElementById('offersTeaserSection');
+  if (teaserSection) teaserSection.style.display = 'none';
+  
   const homeCarouselSection = document.getElementById('homeCarouselSection');
   if (homeCarouselSection) homeCarouselSection.style.display = 'none';
   let matched = products.filter(p => productMatchesSearch(p, searchTerm));
@@ -386,14 +629,21 @@ function renderSearchResults() {
 }
 
 function renderFilteredGrid() {
+  const teaserSection = document.getElementById('offersTeaserSection');
+  if (teaserSection) teaserSection.style.display = 'none';
+  
+  if (selectedCat === 'Offers') {
+    renderOffersPage();
+    return;
+  }
+
   productsGrid.classList.remove('block');
   productsGrid.style.display = 'grid';
   let filtered = products.filter(p => {
     if (selectedCat === 'All') {
       if (searchTerm !== '') return productMatchesSearch(p, searchTerm);
       return p.showOnHomeRaw && p.showOnHomeRaw.toLowerCase().startsWith('yes');
-    } else if (selectedCat === 'Offers') return p.offer === true;
-    else if (selectedCat === 'Cut Vegetables') return isCutVegetable(p.category);
+    } else if (selectedCat === 'Cut Vegetables') return isCutVegetable(p.category);
     else return p.category === selectedCat;
   });
   if (selectedCat === 'All' && searchTerm === '') {
@@ -661,7 +911,7 @@ function renderStickyDetailedList() {
   const savingsSpan = document.getElementById('stickyDetailedSavings');
   if (itemsSpan) itemsSpan.textContent = totalItems;
   if (savingsSpan) savingsSpan.textContent = `₹${totalSavings}`;
-  
+
   container.querySelectorAll('.sticky-qty-btn').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
@@ -683,8 +933,14 @@ function updateStickyCartBar() {
   const itemCount = ids.reduce((sum, id) => sum + cart[id], 0);
   if (itemCount === 0) {
     if (stickyBar) stickyBar.style.display = 'none';
-    return;
+    document.body.classList.remove('cart-not-empty');
+  } else {
+    document.body.classList.add('cart-not-empty');
+    if (stickyBar) stickyBar.style.display = 'block';
   }
+  
+  if (itemCount === 0) return;
+  
   let totalSaved = 0;
   let subtotal = 0;
   ids.forEach(id => {
@@ -723,7 +979,7 @@ function closeCart() {
   }
 }
 
-// ========== ADDRESS FLOW (ENHANCED) ==========
+// ========== ADDRESS FLOW ==========
 function getCartSubtotal() {
   let subtotal = 0;
   Object.keys(cart).forEach(id => {
@@ -747,7 +1003,6 @@ function getCartTotalSavings() {
   return savings;
 }
 
-// Helper: scroll to Confirm Location button smoothly
 function scrollToConfirmButton() {
   const btn = document.getElementById('confirmLocationBtn');
   if (btn && !btn.disabled) {
@@ -796,21 +1051,27 @@ function createMap() {
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.lat}&lon=${pos.lng}&zoom=18&addressdetails=1`);
         const data = await response.json();
         const address = data.display_name || `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
-        document.getElementById('selectedLocationDisplay').innerHTML = `<strong>Selected location:</strong> ${address}`;
+        const displayDiv = document.getElementById('selectedLocationDisplay');
+        if (displayDiv) displayDiv.innerHTML = `<strong>Selected location:</strong> ${address}`;
         customerData.location = { lat: pos.lat, lng: pos.lng, address: address };
-        document.getElementById('confirmLocationBtn').disabled = false;
+        const confirmBtn = document.getElementById('confirmLocationBtn');
+        if (confirmBtn) confirmBtn.disabled = false;
         scrollToConfirmButton();
       } catch (err) {
-        document.getElementById('selectedLocationDisplay').innerHTML = `<strong>Selected location:</strong> ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
+        const displayDiv = document.getElementById('selectedLocationDisplay');
+        if (displayDiv) displayDiv.innerHTML = `<strong>Selected location:</strong> ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
         customerData.location = { lat: pos.lat, lng: pos.lng, address: `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}` };
-        document.getElementById('confirmLocationBtn').disabled = false;
+        const confirmBtn = document.getElementById('confirmLocationBtn');
+        if (confirmBtn) confirmBtn.disabled = false;
         scrollToConfirmButton();
       }
     } else {
       currentLocationValid = false;
       showToast("❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.");
-      document.getElementById('selectedLocationDisplay').innerHTML = '';
-      document.getElementById('confirmLocationBtn').disabled = true;
+      const displayDiv = document.getElementById('selectedLocationDisplay');
+      if (displayDiv) displayDiv.innerHTML = '';
+      const confirmBtn = document.getElementById('confirmLocationBtn');
+      if (confirmBtn) confirmBtn.disabled = true;
     }
   });
   attemptAutoLocation();
@@ -869,7 +1130,8 @@ function useCurrentLocation() {
 
 function showStep(step) {
   document.querySelectorAll('.step-content').forEach(el => el.style.display = 'none');
-  document.getElementById(`step${step}Content`).style.display = 'block';
+  const stepContent = document.getElementById(`step${step}Content`);
+  if (stepContent) stepContent.style.display = 'block';
   document.querySelectorAll('.step').forEach((el, idx) => {
     if (idx + 1 === step) el.classList.add('active');
     else el.classList.remove('active');
@@ -877,8 +1139,10 @@ function showStep(step) {
   currentStep = step;
   if (step === 4) {
     const fullAddr = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
-    document.getElementById('confirmAddress').innerHTML = `${fullAddr}<br>Type: ${customerData.addressType}`;
-    document.getElementById('confirmCustomer').innerHTML = `${customerData.name}<br>📞 ${customerData.phone}`;
+    const confirmAddress = document.getElementById('confirmAddress');
+    if (confirmAddress) confirmAddress.innerHTML = `${fullAddr}<br>Type: ${customerData.addressType}`;
+    const confirmCustomer = document.getElementById('confirmCustomer');
+    if (confirmCustomer) confirmCustomer.innerHTML = `${customerData.name}<br>📞 ${customerData.phone}`;
     let subtotal = getCartSubtotal();
     let ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
     let total = subtotal + ecoCharge;
@@ -889,46 +1153,34 @@ function showStep(step) {
       const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
       summaryHtml += `<div>${p.name} ×${qty} = ₹${price * qty}</div>`;
     });
-    document.getElementById('confirmOrderSummary').innerHTML = summaryHtml;
-    document.getElementById('ecoBoxChargeLine').style.display = customerData.useEcoBox ? 'block' : 'none';
-    document.getElementById('confirmFinalTotal').innerHTML = `Total: ₹${total}`;
+    const orderSummary = document.getElementById('confirmOrderSummary');
+    if (orderSummary) orderSummary.innerHTML = summaryHtml;
+    const ecoLine = document.getElementById('ecoBoxChargeLine');
+    if (ecoLine) ecoLine.style.display = customerData.useEcoBox ? 'block' : 'none';
+    const finalTotal = document.getElementById('confirmFinalTotal');
+    if (finalTotal) finalTotal.innerHTML = `Total: ₹${total}`;
   }
 }
 
 function loadSavedCustomerData() {
-
   const saved = localStorage.getItem('freshAdat_customer');
-
   if (saved) {
-
     try {
-
       const data = JSON.parse(saved);
-
       if (data.name) customerData.name = data.name;
       if (data.phone) customerData.phone = data.phone;
-
-      if (data.house && data.location) {
-
+      if (data.address && data.location) {
         customerData.house = data.house || '';
         customerData.area = data.area || '';
         customerData.landmark = data.landmark || '';
         customerData.addressType = data.addressType || 'Home';
-
-        customerData.location = data.location || {
-          lat: ADAT_LAT,
-          lng: ADAT_LON,
-          address: 'Adat, Kerala, India'
-        };
-
+        customerData.location = data.location || { lat: ADAT_LAT, lng: ADAT_LON, address: 'Adat, Kerala, India' };
         customerData.useEcoBox = data.useEcoBox || false;
       }
-
-    } catch(e) {
-      console.log(e);
-    }
+    } catch(e) {}
   }
 }
+
 function saveCustomerData() {
   const toSave = {
     name: customerData.name,
@@ -943,21 +1195,22 @@ function saveCustomerData() {
   localStorage.setItem('freshAdat_customer', JSON.stringify(toSave));
 }
 
-// Enhanced saved summary with order details and map link
 function showSavedSummary() {
-  document.getElementById('stepIndicator').style.display = 'none';
-  document.getElementById('multiStepContent').style.display = 'none';
-  document.getElementById('savedSummaryCard').style.display = 'block';
-  
+  const stepIndicator = document.getElementById('stepIndicator');
+  const multiStep = document.getElementById('multiStepContent');
+  const savedCard = document.getElementById('savedSummaryCard');
+  if (stepIndicator) stepIndicator.style.display = 'none';
+  if (multiStep) multiStep.style.display = 'none';
+  if (savedCard) savedCard.style.display = 'block';
+
   const fullAddr = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
   const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
-  
-  // Build order summary HTML
+
   const subtotal = getCartSubtotal();
   const totalSavings = getCartTotalSavings();
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + ecoCharge;
-  
+
   let itemsHtml = '';
   Object.keys(cart).forEach(id => {
     const p = products.find(x => x.id == id);
@@ -965,7 +1218,7 @@ function showSavedSummary() {
     const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
     itemsHtml += `<div class="order-summary-item">${p.name} ×${qty} = ₹${price * qty}</div>`;
   });
-  
+
   const summaryHtml = `
     <div class="saved-address-section">
       <h4><i class="fas fa-map-marker-alt"></i> Delivery Address</h4>
@@ -992,29 +1245,36 @@ function showSavedSummary() {
       ✅ Delivered in reusable eco‑box<br>♻️ Please return the empty box after delivery
     </div>
   `;
-  document.getElementById('savedSummaryDetails').innerHTML = summaryHtml;
+  const detailsDiv = document.getElementById('savedSummaryDetails');
+  if (detailsDiv) detailsDiv.innerHTML = summaryHtml;
 }
 
 function startMultiStepFlow() {
-  document.getElementById('stepIndicator').style.display = 'flex';
-  document.getElementById('multiStepContent').style.display = 'block';
-  document.getElementById('savedSummaryCard').style.display = 'none';
+  const stepIndicator = document.getElementById('stepIndicator');
+  const multiStep = document.getElementById('multiStepContent');
+  const savedCard = document.getElementById('savedSummaryCard');
+  if (stepIndicator) stepIndicator.style.display = 'flex';
+  if (multiStep) multiStep.style.display = 'block';
+  if (savedCard) savedCard.style.display = 'none';
   currentStep = 1;
   showStep(1);
-  if (customerData.house) {
-    document.getElementById('addrHouse').value = customerData.house;
-    document.getElementById('addrArea').value = customerData.area;
-    document.getElementById('addrLandmark').value = customerData.landmark;
-    const radio = document.querySelector(`input[name="addrType"][value="${customerData.addressType}"]`);
-    if (radio) radio.checked = true;
-    document.getElementById('ecoBoxCheckbox').checked = customerData.useEcoBox;
-  }
+  const houseInput = document.getElementById('addrHouse');
+  const areaInput = document.getElementById('addrArea');
+  const landmarkInput = document.getElementById('addrLandmark');
+  const ecoCheckbox = document.getElementById('ecoBoxCheckbox');
+  if (customerData.house && houseInput) houseInput.value = customerData.house;
+  if (customerData.area && areaInput) areaInput.value = customerData.area;
+  if (customerData.landmark && landmarkInput) landmarkInput.value = customerData.landmark;
+  const radio = document.querySelector(`input[name="addrType"][value="${customerData.addressType}"]`);
+  if (radio) radio.checked = true;
+  if (ecoCheckbox) ecoCheckbox.checked = customerData.useEcoBox;
   if (customerData.name) {
-    document.getElementById('custFullName').value = customerData.name;
-    document.getElementById('custPhoneNumber').value = customerData.phone;
-    document.getElementById('savedAddressPreview').innerHTML = `<strong>Saved address:</strong> ${customerData.house}, ${customerData.area}`;
-  } else {
-    document.getElementById('savedAddressPreview').innerHTML = '';
+    const nameInput = document.getElementById('custFullName');
+    const phoneInput = document.getElementById('custPhoneNumber');
+    const preview = document.getElementById('savedAddressPreview');
+    if (nameInput) nameInput.value = customerData.name;
+    if (phoneInput) phoneInput.value = customerData.phone;
+    if (preview) preview.innerHTML = `<strong>Saved address:</strong> ${customerData.house}, ${customerData.area}`;
   }
   if (!map) initMap();
 }
@@ -1026,25 +1286,24 @@ function openAddressFlow() {
   }
   closeCart();
   loadSavedCustomerData();
-  addressFlowModal.style.display = 'flex';
+  const modal = document.getElementById('addressFlowModal');
+  if (modal) modal.style.display = 'flex';
   const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location.lat;
- if (hasSavedData) {
-
-  showSavedSummary();
-
-} else {
-
-  startMultiStepFlow();
-
-}
+  if (hasSavedData) {
+    showSavedSummary();
+  } else {
+    startMultiStepFlow();
+  }
 }
 
 function closeAddressFlow() {
-  addressFlowModal.style.display = 'none';
+  const modal = document.getElementById('addressFlowModal');
+  if (modal) modal.style.display = 'none';
 }
 
 function handleBack() {
-  if (document.getElementById('savedSummaryCard').style.display === 'block') {
+  const savedCard = document.getElementById('savedSummaryCard');
+  if (savedCard && savedCard.style.display === 'block') {
     closeAddressFlow();
   } else {
     if (currentStep === 1) {
@@ -1060,13 +1319,12 @@ function sendOrderFromSummary() {
 }
 
 function sendFinalWhatsApp() {
-  saveCustomerData();
   const subtotal = getCartSubtotal();
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + ecoCharge;
   const fullAddress = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
   const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
-  
+
   let itemsList = '';
   Object.keys(cart).forEach(id => {
     const p = products.find(x => x.id == id);
@@ -1089,48 +1347,68 @@ function sendFinalWhatsApp() {
 function initAddressFlow() {
   addressFlowModal = document.getElementById('addressFlowModal');
   if (!addressFlowModal) return;
-  document.getElementById('closeAddressFlow').addEventListener('click', closeAddressFlow);
-  document.getElementById('backArrowBtn').addEventListener('click', handleBack);
+  const closeBtn = document.getElementById('closeAddressFlow');
+  const backBtn = document.getElementById('backArrowBtn');
+  const confirmLocationBtn = document.getElementById('confirmLocationBtn');
+  const nextPersonalBtn = document.getElementById('nextToPersonalBtn');
+  const nextConfirmBtn = document.getElementById('nextToConfirmBtn');
+  const sendFinalBtn = document.getElementById('sendWhatsAppFinalBtn');
+  const editBtn = document.getElementById('editAddressBtn');
+  const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
+  const useLocationBtn = document.getElementById('useMyLocationBtn');
+
+  if (closeBtn) closeBtn.addEventListener('click', closeAddressFlow);
+  if (backBtn) backBtn.addEventListener('click', handleBack);
+  if (confirmLocationBtn) {
+    confirmLocationBtn.addEventListener('click', () => {
+      if (currentLocationValid) {
+        showStep(2);
+      } else {
+        showToast('Please select a location within 5 km delivery area.');
+      }
+    });
+  }
+  if (nextPersonalBtn) {
+    nextPersonalBtn.addEventListener('click', () => {
+      const house = document.getElementById('addrHouse');
+      const area = document.getElementById('addrArea');
+      const landmark = document.getElementById('addrLandmark');
+      const selectedType = document.querySelector('input[name="addrType"]:checked');
+      const ecoCheckbox = document.getElementById('ecoBoxCheckbox');
+      if (!house || !house.value.trim()) {
+        showToast('Please enter house/flat/floor number');
+        return;
+      }
+      customerData.house = house.value.trim();
+      customerData.area = area ? area.value.trim() : '';
+      customerData.landmark = landmark ? landmark.value.trim() : '';
+      if (selectedType) customerData.addressType = selectedType.value;
+      if (ecoCheckbox) customerData.useEcoBox = ecoCheckbox.checked;
+      showStep(3);
+    });
+  }
+  if (nextConfirmBtn) {
+    nextConfirmBtn.addEventListener('click', () => {
+      const name = document.getElementById('custFullName');
+      const phone = document.getElementById('custPhoneNumber');
+      if (!name || !name.value.trim() || !phone || !phone.value.trim()) {
+        showToast('Please enter your full name and phone number');
+        return;
+      }
+      customerData.name = name.value.trim();
+      customerData.phone = phone.value.trim();
+      saveCustomerData();
+      showStep(4);
+    });
+  }
+  if (sendFinalBtn) sendFinalBtn.addEventListener('click', sendFinalWhatsApp);
+  if (editBtn) editBtn.addEventListener('click', startMultiStepFlow);
+  if (sendSummaryBtn) sendSummaryBtn.addEventListener('click', sendOrderFromSummary);
+  if (useLocationBtn) useLocationBtn.addEventListener('click', useCurrentLocation);
+
   window.addEventListener('click', (e) => {
     if (e.target === addressFlowModal) closeAddressFlow();
   });
-  document.getElementById('confirmLocationBtn').addEventListener('click', () => {
-    if (currentLocationValid) {
-      showStep(2);
-    } else {
-      showToast('Please select a location within 5 km delivery area.');
-    }
-  });
-  document.getElementById('nextToPersonalBtn').addEventListener('click', () => {
-    customerData.house = document.getElementById('addrHouse').value.trim();
-    if (!customerData.house) {
-      showToast('Please enter house/flat/floor number');
-      return;
-    }
-    customerData.area = document.getElementById('addrArea').value.trim();
-    customerData.landmark = document.getElementById('addrLandmark').value.trim();
-    const selectedType = document.querySelector('input[name="addrType"]:checked');
-    if (selectedType) customerData.addressType = selectedType.value;
-    customerData.useEcoBox = document.getElementById('ecoBoxCheckbox').checked;
-    showStep(3);
-  });
-  document.getElementById('nextToConfirmBtn').addEventListener('click', () => {
-    const name = document.getElementById('custFullName').value.trim();
-    const phone = document.getElementById('custPhoneNumber').value.trim();
-    if (!name || !phone) {
-      showToast('Please enter your full name and phone number');
-      return;
-    }
-    customerData.name = name;
-    customerData.phone = phone;
-    showStep(4);
-  });
-  document.getElementById('sendWhatsAppFinalBtn').addEventListener('click', sendFinalWhatsApp);
-  document.getElementById('editAddressBtn').addEventListener('click', () => {
-    startMultiStepFlow();
-  });
-  document.getElementById('sendFromSummaryBtn').addEventListener('click', sendOrderFromSummary);
-  document.getElementById('useMyLocationBtn').addEventListener('click', useCurrentLocation);
 }
 
 // ========== CATEGORIES MODAL ==========
@@ -1154,6 +1432,338 @@ function openCategoriesModal() {
 }
 function closeCategoriesModal() { categoriesModal.classList.remove('open'); }
 
+// ========== ACCOUNT MODAL ==========
+function openAccountModal() {
+  renderAccountModal();
+  const accountModal = document.getElementById('accountModal');
+  if (accountModal) accountModal.style.display = 'flex';
+}
+
+function closeAccountModalFunc() {
+  const accountModal = document.getElementById('accountModal');
+  if (accountModal) accountModal.style.display = 'none';
+}
+
+function showStaticContent(title, content) {
+  const body = document.getElementById('accountModalBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="static-content">
+      <div class="static-header">
+        <button class="back-to-account" id="backToAccountBtn"><i class="fas fa-arrow-left"></i></button>
+        <h3>${escapeHtml(title)}</h3>
+      </div>
+      <div class="static-body">
+        ${content}
+      </div>
+    </div>
+  `;
+  document.getElementById('backToAccountBtn')?.addEventListener('click', () => {
+    renderAccountModal();
+  });
+}
+
+function renderAccountModal() {
+  const body = document.getElementById('accountModalBody');
+  if (!body) return;
+  
+  const saved = localStorage.getItem('freshAdat_customer');
+  if (saved) {
+    try {
+      const user = JSON.parse(saved);
+      if (user.name && user.phone && user.location && user.house) {
+        // Logged in user
+        const fullAddress = `${user.house}, ${user.area}${user.landmark ? ', ' + user.landmark : ''}, ${user.location.address}`;
+        body.innerHTML = `
+          <div class="user-info" style="text-align: center; padding: 20px;">
+            <div class="user-avatar"><i class="fas fa-user-circle" style="font-size: 4rem; color: var(--green);"></i></div>
+            <h2>${escapeHtml(user.name)}</h2>
+            <p><i class="fas fa-phone"></i> ${escapeHtml(user.phone)}</p>
+            <p><i class="fas fa-map-marker-alt"></i> ${escapeHtml(fullAddress)}</p>
+            <p><i class="fas fa-envelope"></i> fresh4adat@gmail.com</p>
+            <button id="editProfileBtn" class="edit-profile-btn" style="background: var(--green); color: white; border: none; border-radius: 40px; padding: 10px 24px; margin-top: 16px; cursor: pointer;"><i class="fas fa-edit"></i> Edit Profile</button>
+          </div>
+          <div class="account-menu">
+            <div class="menu-item" id="contactUsBtnLogged">
+              <i class="fas fa-headset"></i>
+              <span>Contact Us</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+            <div class="menu-item" id="downloadAppBtnLogged">
+              <i class="fas fa-download"></i>
+              <span>Download App</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+            <div class="menu-item" id="faqsBtnLogged">
+              <i class="fas fa-question-circle"></i>
+              <span>FAQs</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+            <div class="menu-item" id="termsBtnLogged">
+              <i class="fas fa-file-contract"></i>
+              <span>Terms & Conditions</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+            <div class="menu-item" id="privacyBtnLogged">
+              <i class="fas fa-shield-alt"></i>
+              <span>Privacy Policy</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+            <div class="menu-item" id="sellerInfoBtnLogged">
+              <i class="fas fa-store"></i>
+              <span>Seller Information</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+            <div class="menu-item logout-item" id="logoutBtn">
+              <i class="fas fa-sign-out-alt"></i>
+              <span>Logout</span>
+              <i class="fas fa-chevron-right"></i>
+            </div>
+          </div>
+        `;
+        
+        document.getElementById('editProfileBtn')?.addEventListener('click', () => {
+          closeAccountModalFunc();
+          startMultiStepFlow();
+        });
+        document.getElementById('contactUsBtnLogged')?.addEventListener('click', () => {
+          showStaticContent('Contact Us', `
+            <p><strong>📞 Phone:</strong> <a href="tel:+919496840336">+91 94968 40336</a></p>
+            <p><strong>📧 Email:</strong> <a href="mailto:fresh4adat@gmail.com">fresh4adat@gmail.com</a></p>
+            <p><strong>📍 Address:</strong> Adat, Thrissur, Kerala, India</p>
+            <p><strong>⏰ Business Hours:</strong> Monday - Saturday, 9:00 AM - 7:00 PM</p>
+          `);
+        });
+        document.getElementById('downloadAppBtnLogged')?.addEventListener('click', () => {
+          const installBanner = document.getElementById('installBanner');
+          if (installBanner) installBanner.style.display = 'flex';
+          else showToast('📱 Please use Chrome or Safari to install the app');
+          closeAccountModalFunc();
+        });
+        document.getElementById('faqsBtnLogged')?.addEventListener('click', () => {
+          showStaticContent('Frequently Asked Questions', `
+            <div class="faq-item"><strong>❓ How do I place an order?</strong><br>Select products, add to cart, then click "Place Order" and fill delivery details.</div>
+            <div class="faq-item"><strong>❓ What is the delivery area?</strong><br>We deliver within 5 km of Adat, Thrissur.</div>
+            <div class="faq-item"><strong>❓ Is there a minimum order value?</strong><br>No minimum order value. Free delivery above ₹200.</div>
+            <div class="faq-item"><strong>❓ What is the eco-box charge?</strong><br>We deliver in reusable eco-boxes for ₹10 per order. Please return the empty box after delivery.</div>
+            <div class="faq-item"><strong>❓ How do I track my order?</strong><br>You will receive a WhatsApp confirmation after placing the order.</div>
+            <div class="faq-item"><strong>❓ Can I modify my order after placing?</strong><br>Please contact us immediately via WhatsApp or phone.</div>
+          `);
+        });
+       document.getElementById('termsBtnLogged')?.addEventListener('click', () => {
+  showStaticContent('Terms & Conditions', `
+    <p><strong>1. Acceptance of Terms</strong><br>
+    By accessing or using Fresh Adat, you agree to comply with these Terms & Conditions.</p>
+
+    <p><strong>2. Product Availability & Pricing</strong><br>
+    Product availability and prices are subject to change without prior notice.</p>
+
+    <p><strong>3. Delivery Policy</strong><br>
+    We currently deliver within selected areas near Adat, Thrissur. Delivery times are approximate and may vary due to traffic, weather, or other conditions.</p>
+
+    <p><strong>4. Payment Methods</strong><br>
+    Payments are accepted through Cash on Delivery, UPI, Google Pay, PhonePe, and Paytm.</p>
+
+    <p><strong>5. Returns & Refunds</strong><br>
+    Customers must report damaged or incorrect items within 2 hours of delivery. Refunds or replacements are subject to verification.</p>
+
+    <p><strong>6. Eco-Box Policy</strong><br>
+    Eco-boxes provided during delivery remain reusable property. Repeated non-return may result in additional charges.</p>
+
+    <p><strong>7. User Information</strong><br>
+    Customers are responsible for providing accurate delivery details and contact information.</p>
+
+    <p><strong>8. Limitation of Liability</strong><br>
+    Fresh Adat shall not be held responsible for delays or interruptions caused by events beyond our reasonable control.</p>
+
+    <p><strong>9. Changes to Terms</strong><br>
+    These Terms & Conditions may be updated periodically without prior notice.</p>
+  `);
+});
+
+document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
+  showStaticContent('Privacy Policy', `
+    <p><strong>1. Information Collection</strong><br>
+    We collect customer information such as name, phone number, address, and order details solely for delivery and customer support purposes.</p>
+
+    <p><strong>2. Location Data</strong><br>
+    Approximate GPS/location data may be used to improve delivery accuracy.</p>
+
+    <p><strong>3. Data Usage</strong><br>
+    Customer information is used only for order processing, communication, and service improvement.</p>
+
+    <p><strong>4. Data Protection</strong><br>
+    We take reasonable measures to protect customer data from unauthorized access.</p>
+
+    <p><strong>5. Third-Party Services</strong><br>
+    Payment providers or map services may process limited information required for their functionality.</p>
+
+    <p><strong>6. Cookies & Local Storage</strong><br>
+    Our website may use cookies or local storage to improve user experience and save cart/preferences.</p>
+
+    <p><strong>7. User Rights</strong><br>
+    Users may request correction or deletion of their stored information by contacting us.</p>
+
+    <p><strong>8. Policy Updates</strong><br>
+    This Privacy Policy may be updated from time to time.</p>
+  `);
+});
+        document.getElementById('sellerInfoBtnLogged')?.addEventListener('click', () => {
+          showStaticContent('Seller Information', `
+            <p><strong>Business Name:</strong> Fresh Adat</p>
+            <p><strong>Registered Address:</strong> Adat, Thrissur, Kerala - 680551</p>
+            <p><strong>FSSAI License:</strong>21326197000407</p>
+            <p><strong>Contact:</strong> +91 94968 40336</p>
+            <p><strong>Email:</strong> fresh4adat@gmail.com</p>
+          `);
+        });
+        document.getElementById('logoutBtn')?.addEventListener('click', () => {
+          localStorage.removeItem('freshAdat_customer');
+          customerData = {
+            name: '', phone: '', location: { lat: null, lng: null, address: '' },
+            house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false
+          };
+          renderAccountModal();
+          showToast('👋 Logged out successfully');
+        });
+        return;
+      }
+    } catch(e) {}
+  }
+  
+  // Guest view
+  body.innerHTML = `
+    <div class="guest-section">
+      <div class="guest-icon"><i class="fas fa-user-circle"></i></div>
+      <h2>Hi, Guest</h2>
+      <p>Please Login to enjoy your shopping</p>
+      <p><i class="fas fa-envelope"></i> fresh4adat@gmail.com</p>
+      <button id="accountLoginBtn" class="login-btn"><i class="fas fa-sign-in-alt"></i> Login</button>
+    </div>
+    <div class="account-menu">
+      <div class="menu-item" id="contactUsBtnGuest">
+        <i class="fas fa-headset"></i>
+        <span>Contact Us</span>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      <div class="menu-item" id="downloadAppBtnGuest">
+        <i class="fas fa-download"></i>
+        <span>Download App</span>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      <div class="menu-item" id="faqsBtnGuest">
+        <i class="fas fa-question-circle"></i>
+        <span>FAQs</span>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      <div class="menu-item" id="termsBtnGuest">
+        <i class="fas fa-file-contract"></i>
+        <span>Terms & Conditions</span>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      <div class="menu-item" id="privacyBtnGuest">
+        <i class="fas fa-shield-alt"></i>
+        <span>Privacy Policy</span>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      <div class="menu-item" id="sellerInfoBtnGuest">
+        <i class="fas fa-store"></i>
+        <span>Seller Information</span>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('accountLoginBtn')?.addEventListener('click', () => {
+    closeAccountModalFunc();
+    openAddressFlowForLogin();
+  });
+  document.getElementById('contactUsBtnGuest')?.addEventListener('click', () => {
+    showStaticContent('Contact Us', `
+      <p><strong>📞 Phone:</strong> <a href="tel:+919496840336">+91 94968 40336</a></p>
+      <p><strong>📧 Email:</strong> <a href="mailto:fresh4adat@gmail.com">fresh4adat@gmail.com</a></p>
+      <p><strong>📍 Address:</strong> Adat, Thrissur, Kerala, India</p>
+      <p><strong>⏰ Business Hours:</strong> Monday - Saturday, 9:00 AM - 7:00 PM</p>
+    `);
+  });
+  document.getElementById('downloadAppBtnGuest')?.addEventListener('click', () => {
+    const installBanner = document.getElementById('installBanner');
+    if (installBanner) installBanner.style.display = 'flex';
+    else showToast('📱 Please use Chrome or Safari to install the app');
+    closeAccountModalFunc();
+  });
+  document.getElementById('faqsBtnGuest')?.addEventListener('click', () => {
+    showStaticContent('Frequently Asked Questions', `
+      <div class="faq-item"><strong>❓ How do I place an order?</strong><br>Select products, add to cart, then click "Place Order" and fill delivery details.</div>
+      <div class="faq-item"><strong>❓ What is the delivery area?</strong><br>We deliver within 5 km of Adat, Thrissur.</div>
+      <div class="faq-item"><strong>❓ Is there a minimum order value?</strong><br>No minimum order value. Free delivery above ₹200.</div>
+      <div class="faq-item"><strong>❓ What is the eco-box charge?</strong><br>We deliver in reusable eco-boxes for ₹10 per order. Please return the empty box after delivery.</div>
+      <div class="faq-item"><strong>❓ How do I track my order?</strong><br>You will receive a WhatsApp confirmation after placing the order.</div>
+      <div class="faq-item"><strong>❓ Can I modify my order after placing?</strong><br>Please contact us immediately via WhatsApp or phone.</div>
+    `);
+  });
+  document.getElementById('termsBtnGuest')?.addEventListener('click', () => {
+    showStaticContent('Terms & Conditions', `
+      <p><strong>1. Acceptance of Terms</strong><br>By using Fresh Adat, you agree to these terms.</p>
+      <p><strong>2. Delivery Policy</strong><br>We deliver within 5 km of Adat. Delivery times may vary.</p>
+      <p><strong>3. Payment</strong><br>Payments are accepted via cash on delivery, Google Pay, PhonePe, Paytm.</p>
+      <p><strong>4. Returns & Refunds</strong><br>Quality issues must be reported within 2 hours of delivery.</p>
+      <p><strong>5. Eco-Box</strong><br>Eco-boxes are reusable. Failure to return may incur additional charges.</p>
+      <p><strong>6. Privacy</strong><br>Your data is safe and never shared with third parties.</p>
+    `);
+  });
+  document.getElementById('privacyBtnGuest')?.addEventListener('click', () => {
+    showStaticContent('Privacy Policy', `
+      <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
+      <p><strong>Data Security</strong><br>Your data is stored securely and not shared with third parties.</p>
+      <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
+      <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
+    `);
+  });
+  document.getElementById('sellerInfoBtnGuest')?.addEventListener('click', () => {
+    showStaticContent('Seller Information', `
+      <p><strong>Business Name:</strong> Fresh Adat</p>
+      <p><strong>Registered Address:</strong> Adat, Thrissur, Kerala - 680551</p>
+      <p><strong>GSTIN:</strong> 32ABCDE1234F1Z5</p>
+      <p><strong>FSSAI License:</strong> 12345678901234</p>
+      <p><strong>Contact:</strong> +91 94968 40336</p>
+      <p><strong>Email:</strong> fresh4adat@gmail.com</p>
+    `);
+  });
+}
+
+function openAddressFlowForLogin() {
+  loadSavedCustomerData();
+  addressFlowModal.style.display = 'flex';
+  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location.lat;
+  if (hasSavedData) {
+    showSavedSummary();
+    const sendBtn = document.getElementById('sendFromSummaryBtn');
+    if (sendBtn) {
+      sendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
+      const oldClick = sendBtn.onclick;
+      sendBtn.onclick = () => {
+        saveCustomerData();
+        closeAddressFlow();
+        renderAccountModal();
+        showToast('✅ Profile saved');
+      };
+    }
+  } else {
+    startMultiStepFlow();
+    const finalSendBtn = document.getElementById('sendWhatsAppFinalBtn');
+    if (finalSendBtn) {
+      finalSendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
+      finalSendBtn.onclick = () => {
+        saveCustomerData();
+        closeAddressFlow();
+        renderAccountModal();
+        showToast('✅ Profile saved');
+      };
+    }
+  }
+}
+
 // ========== LOAD DATA ==========
 function loadData() {
   const baseUrl = 'https://opensheet.elk.sh/1FEpSYZlTrlp0BYPEcVCYISC0kgXpt_3Fcw5XAcjLOvs';
@@ -1161,8 +1771,9 @@ function loadData() {
     fetch(`${baseUrl}/Sheet1`).then(res => res.json()),
     fetch(`${baseUrl}/Sheet2`).then(res => res.json()),
     fetch(`${baseUrl}/Sheet4`).then(res => res.json()),
-    fetch(`${baseUrl}/Sheet5`).then(res => res.json()).catch(() => { console.warn('Sheet5 not found'); return []; })
-  ]).then(([sheet1, sheet2, sheet4, sheet5]) => {
+    fetch(`${baseUrl}/Sheet5`).then(res => res.json()).catch(() => []),
+    fetch(`${baseUrl}/Sheet6`).then(res => res.json()).catch(() => [])
+  ]).then(([sheet1, sheet2, sheet4, sheet5, sheet6]) => {
     if (sheet5 && sheet5.length) {
       sheet5.forEach(row => {
         let nameKey = null, url = null;
@@ -1199,6 +1810,25 @@ function loadData() {
     const organic = processSheet(sheet2, 100, true);
     const cut = processSheet(sheet4, 200, false);
     products = [...fresh, ...organic, ...cut];
+
+    if (sheet6 && sheet6.length) {
+      offers = sheet6.map((row, idx) => {
+        const isSlide = row.is_slide && row.is_slide.toString().toLowerCase() === 'true';
+        return {
+          id: idx,
+          name: row.offer_name || 'Special Offer',
+          unit: row.offer_unit || '1 pc',
+          oldPrice: Number(row.offer_old_price) || 0,
+          newPrice: Number(row.offer_new_price) || 0,
+          discountPercent: row.discount_percent || '🔥 OFF',
+          expiryDate: row.expiry_date || null,
+          productId: Number(row.product_id) || null,
+          isSlide: isSlide,
+          slideImageUrl: isSlide ? (row.slide_image_url || '') : '',
+          imageUrl: row.image_url || getImageUrl(row.offer_name)
+        };
+      });
+    }
     renderCategories();
     renderProducts();
     updateStickyCartBar();
@@ -1279,10 +1909,10 @@ document.addEventListener('DOMContentLoaded', () => {
   stickyCartBtn = document.getElementById('stickyCartBtn');
   stickyToggleBtn = document.getElementById('stickyCartToggleBtn');
   stickyDetailedDiv = document.getElementById('stickyCartDetailed');
-  
+
   if (stickyCartBtn) stickyCartBtn.addEventListener('click', openCart);
   if (stickyToggleBtn) stickyToggleBtn.addEventListener('click', toggleStickyDetailed);
-  
+
   document.getElementById('cartButton').addEventListener('click', openCart);
   document.getElementById('closeCartBtn').addEventListener('click', closeCart);
   cartOverlay.addEventListener('click', closeCart);
@@ -1313,7 +1943,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  
+
   const visionModalElem = document.getElementById('visionModal');
   const visionLink = document.getElementById('visionLink');
   const closeVisionBtn = document.getElementById('closeVisionModal');
@@ -1324,10 +1954,84 @@ document.addEventListener('DOMContentLoaded', () => {
     closeVisionBtn.addEventListener('click', () => visionModalElem.classList.remove('open'));
     visionModalElem.addEventListener('click', (e) => { if (e.target === visionModalElem) visionModalElem.classList.remove('open'); });
   }
-  
+
   initSearchListeners();
   initAddressFlow();
   loadData();
+
+  // Offer modal listeners
+  const offerModal = document.getElementById('offerDetailModal');
+  const closeOfferModalBtn = document.getElementById('closeOfferModal');
+  const addOfferBtn = document.getElementById('addOfferToCartBtn');
+  if (closeOfferModalBtn) closeOfferModalBtn.addEventListener('click', closeOfferModal);
+  if (addOfferBtn) addOfferBtn.addEventListener('click', addOfferToCart);
+  if (offerModal) offerModal.addEventListener('click', (e) => { if (e.target === offerModal) closeOfferModal(); });
+
+  // ========== BOTTOM NAVIGATION BAR ==========
+  const bottomNavBar = document.getElementById('bottomNavBar');
+  let lastScrollTop = 0;
+  let scrollTimeout;
+
+  function handleBottomBar() {
+    if (!bottomNavBar) return;
+    
+    if (document.body.classList.contains('cart-not-empty')) {
+      bottomNavBar.classList.remove('visible');
+      return;
+    }
+    
+    const currentScroll = window.scrollY || document.documentElement.scrollTop;
+    
+    if (currentScroll < lastScrollTop) {
+      bottomNavBar.classList.add('visible');
+    } else if (currentScroll > lastScrollTop) {
+      bottomNavBar.classList.remove('visible');
+    } else if (currentScroll === 0) {
+      bottomNavBar.classList.add('visible');
+    }
+    
+    lastScrollTop = currentScroll <= 0 ? 0 : currentScroll;
+  }
+
+  setTimeout(() => {
+    if (!document.body.classList.contains('cart-not-empty') && (window.scrollY || document.documentElement.scrollTop) === 0) {
+      bottomNavBar.classList.add('visible');
+    }
+  }, 100);
+
+  window.addEventListener('scroll', () => {
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(handleBottomBar, 20);
+  });
+  window.addEventListener('resize', handleBottomBar);
+  window.addEventListener('load', handleBottomBar);
+
+  document.querySelectorAll('.bottom-nav-item').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const action = btn.dataset.nav;
+      switch(action) {
+        case 'home':
+          resetToHome();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          break;
+        case 'category':
+          openCategoriesModal();
+          break;
+        case 'account':
+          openAccountModal();
+          break;
+      }
+      bottomNavBar.classList.remove('visible');
+    });
+  });
+
+  // ========== ACCOUNT MODAL CLOSE ==========
+  const accountModal = document.getElementById('accountModal');
+  const closeAccountModalBtn = document.getElementById('closeAccountModal');
+  if (closeAccountModalBtn) closeAccountModalBtn.addEventListener('click', closeAccountModalFunc);
+  if (accountModal) accountModal.addEventListener('click', (e) => {
+    if (e.target === accountModal) closeAccountModalFunc();
+  });
 
   // PWA install banner
   let deferredPrompt;
