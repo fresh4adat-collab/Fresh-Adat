@@ -1,6 +1,794 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes"
+  />
+
+  <title>Fresh Adat – Coming Soon</title>
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700;900&display=swap"
+    rel="stylesheet"
+  />
+
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+  />
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --green: #1a6b3c;
+      --green-light: #2d9e5f;
+      --green-pale: #e8f5ee;
+      --orange: #f47c2b;
+      --cream: #fefaf5;
+      --brown: #4e3b28;
+      --text-muted: #6b7c6f;
+      --white: #ffffff;
+      --shadow-sm: 0 8px 20px rgba(0, 0, 0, 0.05);
+      --radius-card: 28px;
+    }
+
+    body {
+      font-family: "Inter", sans-serif;
+      background: var(--cream);
+      overflow-x: hidden;
+    }
+
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+
+      background: rgba(26, 107, 60, 0.95);
+      backdrop-filter: blur(12px);
+
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .nav-container {
+      max-width: 600px;
+      margin: auto;
+
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      padding: 12px 18px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+
+      border-radius: 50%;
+      background: var(--orange);
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      color: white;
+    }
+
+    .logo-text {
+      font-size: 1.5rem;
+      font-weight: 900;
+      font-family: "Playfair Display", serif;
+      color: white;
+    }
+
+    .logo-text span {
+      color: var(--orange);
+    }
+
+    .nav-cart {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+
+      padding: 8px 14px;
+      border-radius: 30px;
+
+      display: flex;
+      align-items: center;
+      gap: 6px;
+
+      font-size: 0.9rem;
+    }
+
+    .main-container {
+      max-width: 600px;
+      margin: auto;
+      padding: 18px;
+    }
+
+    .countdown-card {
+      background: linear-gradient(135deg, #1a6b3c, #0d542f);
+      border-radius: 28px;
+
+      padding: 28px 18px;
+      text-align: center;
+
+      margin-bottom: 24px;
+
+      position: relative;
+      overflow: hidden;
+    }
+
+    .countdown-title {
+      font-size: 2rem;
+      color: white;
+      font-family: "Playfair Display", serif;
+      margin-bottom: 10px;
+    }
+
+    .countdown-sub {
+      color: rgba(255, 255, 255, 0.85);
+      margin-bottom: 22px;
+      font-size: 0.9rem;
+    }
+
+    .timer-grid {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+    }
+
+    .timer-block {
+      min-width: 85px;
+
+      background: rgba(255, 255, 255, 0.15);
+
+      border-radius: 22px;
+
+      padding: 14px 10px;
+
+      backdrop-filter: blur(6px);
+    }
+
+    .timer-number {
+      font-size: 2rem;
+      color: white;
+      font-weight: 800;
+    }
+
+    .timer-label {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.9);
+
+      margin-top: 5px;
+
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* SLIDESHOW */
+
+    .slideshow-wrapper {
+      background: white;
+      border-radius: 28px;
+      overflow: hidden;
+
+      box-shadow: var(--shadow-sm);
+
+      margin-bottom: 24px;
+    }
+
+    .slideshow-container {
+      position: relative;
+      width: 100%;
+      height: 230px;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+
+    .slide.active {
+      opacity: 1;
+      z-index: 2;
+    }
+
+    .slide img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .slide-caption {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+
+      padding: 16px;
+
+      background: linear-gradient(
+        to top,
+        rgba(0, 0, 0, 0.7),
+        transparent
+      );
+
+      color: white;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .dot-group {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+
+      padding: 14px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+
+      border-radius: 20px;
+
+      background: #cfd8d3;
+
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    .dot.active {
+      width: 28px;
+      background: var(--green);
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+
+      margin-bottom: 26px;
+    }
+
+    .feature-card {
+      background: white;
+      border-radius: 24px;
+
+      padding: 16px 10px;
+      text-align: center;
+
+      box-shadow: var(--shadow-sm);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+
+      border-radius: 50%;
+      background: var(--green-pale);
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      margin: auto auto 10px;
+
+      color: var(--green);
+      font-size: 1.4rem;
+    }
+
+    .feature-card h4 {
+      color: var(--green);
+      font-size: 0.9rem;
+      margin-bottom: 5px;
+    }
+
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+    }
+
+    .culture-message {
+      background: #fff4e6;
+      border-left: 4px solid var(--orange);
+
+      padding: 18px;
+      border-radius: 24px;
+
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .malayalam-quote {
+      font-weight: 700;
+      color: var(--brown);
+
+      margin-bottom: 8px;
+    }
+
+    .sub-text {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .app-footer {
+      background: #1b3d2b;
+
+      color: #dfe8e1;
+
+      text-align: center;
+
+      padding: 24px 16px;
+      border-radius: 28px 28px 0 0;
+    }
+
+    .footer-credit {
+      margin-top: 8px;
+      opacity: 0.7;
+      font-size: 0.75rem;
+    }
+
+    @media (max-width: 480px) {
+      .timer-block {
+        min-width: 72px;
+      }
+
+      .timer-number {
+        font-size: 1.7rem;
+      }
+
+      .slideshow-container {
+        height: 200px;
+      }
+
+      .feature-card h4 {
+        font-size: 0.8rem;
+      }
+
+      .feature-card p {
+        font-size: 0.65rem;
+      }
+    }
+    /* FSSAI SECTION */
+
+.fssai-section {
+  background: white;
+
+  border-radius: 28px;
+
+  padding: 22px 18px;
+
+  margin-bottom: 28px;
+
+  box-shadow: var(--shadow-sm);
+}
+
+.fssai-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  margin-bottom: 18px;
+}
+
+.fssai-logo img {
+  width: 58px;
+  height: auto;
+}
+
+.fssai-details h3 {
+  font-size: 1rem;
+  color: var(--green);
+
+  margin-bottom: 4px;
+}
+
+.fssai-license {
+  font-size: 0.82rem;
+  font-weight: 700;
+
+  color: var(--brown);
+
+  margin-bottom: 4px;
+}
+
+.fssai-safe {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.contact-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  margin-bottom: 18px;
+}
+
+.contact-item {
+  background: #f7faf8;
+
+  border-radius: 16px;
+
+  padding: 12px 14px;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  font-size: 0.85rem;
+  color: var(--brown);
+}
+
+.contact-item i {
+  color: var(--green);
+
+  width: 18px;
+
+  font-size: 1rem;
+}
+
+.culture-message {
+  background: #fff5ea;
+
+  border-left: 4px solid var(--orange);
+
+  border-radius: 20px;
+
+  padding: 16px;
+
+  text-align: center;
+}
+
+.malayalam-quote {
+  font-size: 0.95rem;
+
+  font-weight: 700;
+
+  color: var(--brown);
+
+  margin-bottom: 8px;
+}
+
+.sub-text {
+  font-size: 0.78rem;
+
+  color: var(--text-muted);
+}
+  </style>
+</head>
+
+<body>
+
+  <nav class="navbar">
+    <div class="nav-container">
+
+      <div class="logo">
+        <div class="logo-icon">
+          <i class="fas fa-seedling"></i>
+        </div>
+
+        <div class="logo-text">
+          Fresh <span>Adat</span>
+        </div>
+      </div>
+
+      <div class="nav-cart">
+        <i class="fas fa-shopping-bag"></i>
+        Cart
+      </div>
+
+    </div>
+  </nav>
+
+  <main class="main-container">
+
+    <div class="countdown-card">
+
+      <div class="countdown-title">
+        🌿 Opening Soon
+      </div>
+
+      <div class="countdown-sub">
+        June 1, 2026
+      </div>
+
+      <div class="timer-grid">
+
+        <div class="timer-block">
+          <div class="timer-number" id="days">00</div>
+          <div class="timer-label">Days</div>
+        </div>
+
+        <div class="timer-block">
+          <div class="timer-number" id="hours">00</div>
+          <div class="timer-label">Hours</div>
+        </div>
+
+        <div class="timer-block">
+          <div class="timer-number" id="minutes">00</div>
+          <div class="timer-label">Minutes</div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- SLIDESHOW -->
+
+    <div class="slideshow-wrapper">
+
+      <div class="slideshow-container">
+
+        <div class="slide active">
+          <img src="https://res.cloudinary.com/dr9fogycn/image/upload/q_auto/f_auto/v1778668812/ChatGPT_Image_May_13_2026_03_52_47_PM_xdjiqt.png">
+
+          <div class="slide-caption">
+            🌱 Fresh from farm to doorstep
+          </div>
+        </div>
+
+        <div class="slide">
+          <img src="https://res.cloudinary.com/dr9fogycn/image/upload/q_auto/f_auto/v1778668802/ChatGPT_Image_May_13_2026_04_07_19_PM_pg0cwn.png">
+
+          <div class="slide-caption">
+            🍎 Organic & Healthy
+          </div>
+        </div>
+
+        <div class="slide">
+          <img src="https://res.cloudinary.com/dr9fogycn/image/upload/q_auto/f_auto/v1778668803/ChatGPT_Image_May_13_2026_04_04_48_PM_e8cacs.png">
+
+          <div class="slide-caption">
+            🥥 നാടൻ രുചി
+          </div>
+        </div>
+
+      </div>
+
+      <div class="dot-group" id="dots"></div>
+
+    </div>
+
+    <!-- FEATURES -->
+
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <i class="fas fa-leaf"></i>
+        </div>
+
+        <h4>ഓർഗാനിക്</h4>
+        <p>Pure & Natural</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <i class="fas fa-truck"></i>
+        </div>
+
+        <h4>ഫ്രീ ഡെലിവറി</h4>
+        <p>Above ₹200</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <i class="fas fa-recycle"></i>
+        </div>
+
+        <h4>ഇക്കോ ബോക്സ്</h4>
+        <p>Reusable</p>
+      </div>
+
+    </div>
+
+    <!-- FSSAI + CONTACT SECTION -->
+
+<div class="fssai-section">
+
+  <div class="fssai-top">
+
+    <div class="fssai-logo">
+      <img
+        src="https://upload.wikimedia.org/wikipedia/en/e/e2/FSSAI_logo.png"
+        alt="FSSAI"
+      >
+    </div>
+
+    <div class="fssai-details">
+
+      <h3>FSSAI Licensed</h3>
+
+      <p class="fssai-license">
+        License No : 11521034002341
+      </p>
+
+      <p class="fssai-safe">
+        ✔ Safe • Hygienic • Trusted
+      </p>
+
+    </div>
+
+  </div>
+
+  <div class="contact-box">
+
+    <div class="contact-item">
+      <i class="fas fa-location-dot"></i>
+      <span>Adat, Thrissur, Kerala</span>
+    </div>
+
+    <div class="contact-item">
+      <i class="fas fa-phone"></i>
+      <span>+91 9496840336</span>
+    </div>
+    <div class="contact-item">
+      <i class="fas fa-envelope"></i>
+      <span>fresh4adat@gmail.com</span>
+    </div>
+    <div class="contact-item">
+      <i class="fas fa-truck"></i>
+      <span>Delivery within 5km radius</span>
+    </div>
+
+  </div>
+
+  <div class="culture-message">
+
+    <div class="malayalam-quote">
+      ❤️ ശുദ്ധ ജൈവ പച്ചക്കറികൾ, നാടൻ ചന്തയുടെ രുചി
+    </div>
+
+    <div class="sub-text">
+      Fresh vegetables directly from trusted farmers 🌿
+    </div>
+
+  </div>
+
+</div>
+  </main>
+
+  <footer class="app-footer">
+
+    <div>
+      Live Healthy, Live Happy 🌿
+    </div>
+
+    <div class="footer-credit">
+      Powered by STM Groups
+    </div>
+
+  </footer>
+
+  <script>
+
+    /* COUNTDOWN */
+
+    const targetDate = new Date("June 1, 2026 00:00:00").getTime();
+
+    function updateCountdown() {
+
+      const now = new Date().getTime();
+
+      const difference = targetDate - now;
+
+      if (difference <= 0) {
+
+        document.getElementById("days").innerText = "00";
+        document.getElementById("hours").innerText = "00";
+        document.getElementById("minutes").innerText = "00";
+
+        return;
+      }
+
+      const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+
+      const hours = Math.floor(
+        (difference % (1000 * 60 * 60 * 24)) /
+        (1000 * 60 * 60)
+      );
+
+      const minutes = Math.floor(
+        (difference % (1000 * 60 * 60)) /
+        (1000 * 60)
+      );
+
+      document.getElementById("days").innerText =
+        String(days).padStart(2, "0");
+
+      document.getElementById("hours").innerText =
+        String(hours).padStart(2, "0");
+
+      document.getElementById("minutes").innerText =
+        String(minutes).padStart(2, "0");
+    }
+
+    updateCountdown();
+
+    setInterval(updateCountdown, 1000);
+
+    /* SLIDESHOW */
+
+    const slides = document.querySelectorAll(".slide");
+
+    const dotsContainer = document.getElementById("dots");
+
+    let currentSlide = 0;
+
+    slides.forEach((_, index) => {
+
+      const dot = document.createElement("span");
+
+      dot.classList.add("dot");
+
+      if (index === 0) {
+        dot.classList.add("active");
+      }
+
+      dot.addEventListener("click", () => {
+        showSlide(index);
+      });
+
+      dotsContainer.appendChild(dot);
+    });
+
+    const dots = document.querySelectorAll(".dot");
+
+    function showSlide(index) {
+
+      slides.forEach(slide => {
+        slide.classList.remove("active");
+      });
+
+      dots.forEach(dot => {
+        dot.classList.remove("active");
+      });
+
+      slides[index].classList.add("active");
+
+      dots[index].classList.add("active");
+
+      currentSlide = index;
+    }
+
+    function nextSlide() {
+
+      currentSlide++;
+
+      if (currentSlide >= slides.length) {
+        currentSlide = 0;
+      }
+
+      showSlide(currentSlide);
+    }
+
+    setInterval(nextSlide, 3500);
+
+  </script>
+
+</body>
+</html>
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
   <link rel="icon" type="image/png" href="logo.png">
@@ -51,7 +839,7 @@
 <body>
 
 <!-- PWA Install Banner -->
-<div id="installBanner" style="display:none; position: fixed; bottom: 20px; left: 16px; right: 16px; background: #1a6b3c; color: white; border-radius: 16px; padding: 12px 16px; justify-content: space-between; align-items: center; z-index: 10002; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+<!-- <div id="installBanner" style="display:none; position: fixed; bottom: 20px; left: 16px; right: 16px; background: #1a6b3c; color: white; border-radius: 16px; padding: 12px 16px; justify-content: space-between; align-items: center; z-index: 10002; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
   <div style="display: flex; align-items: center; gap: 12px;">
     <i class="fas fa-download"></i>
     <span>Install Fresh Adat app for faster ordering</span>
@@ -92,10 +880,10 @@
   <div class="category-header">
     <div class="cat-row" id="catRow"></div>
     <button class="arrow-more-btn" id="arrowMoreBtn"><i class="fas fa-chevron-right"></i></button>
-  </div>
+  </div> -->
 
   <!-- Offers Teaser Row (home page only) -->
-  <div class="offers-teaser-section" id="offersTeaserSection" style="display: none;">
+  <!-- <div class="offers-teaser-section" id="offersTeaserSection" style="display: none;">
     <div class="offers-teaser-header">
       <h3><i class="fas fa-tag"></i> Offers for you</h3>
       <span class="offers-countdown" id="homeOffersTimer"></span>
@@ -111,10 +899,10 @@
     </div>
     <div class="horizontal-scroll-wrapper" id="homeCarousel"></div>
   </div>
-</main>
+</main> -->
 
 <!-- Cart Panel -->
-<div class="cart-overlay" id="cartOverlay"></div>
+<!-- <div class="cart-overlay" id="cartOverlay"></div>
 <div class="cart-panel" id="cartPanel">
   <div class="cart-header">
     <h2><i class="fas fa-shopping-cart"></i> Your Cart</h2>
@@ -126,10 +914,10 @@
     <div class="cart-total grand"><span>Total</span><span id="footerTotal">₹0</span></div>
     <button type="button" class="order-btn" id="orderBtn"><i class="fab fa-whatsapp"></i> Place Order</button>
   </div>
-</div>
+</div> -->
 
 <!-- Categories Modal -->
-<div id="categoriesModal" class="categories-modal">
+<!-- <div id="categoriesModal" class="categories-modal">
   <div class="categories-modal-content">
     <div class="categories-modal-header">
       <h3><i class="fas fa-tags"></i> All Categories</h3>
@@ -137,10 +925,10 @@
     </div>
     <div class="categories-grid" id="categoriesGrid"></div>
   </div>
-</div>
+</div> -->
 
 <!-- Vision Modal -->
-<div id="visionModal" class="vision-modal">
+<!-- <div id="visionModal" class="vision-modal">
   <div class="vision-modal-content">
     <div class="vision-modal-header">
       <h3><i class="fas fa-eye"></i> Our Vision &amp; Impact</h3>
@@ -169,10 +957,10 @@
       Powered by <strong><a href="https://stmgroups.com" target="_blank" rel="noopener noreferrer">STM Groups</a></strong>
     </div>
   </div>
-</footer>
+</footer> -->
 
 <!-- Sticky Cart Bar -->
-<div id="stickyCartBar" class="sticky-cart-bar" style="display: none;">
+<!-- <div id="stickyCartBar" class="sticky-cart-bar" style="display: none;">
   <div class="sticky-cart-main">
     <div class="sticky-cart-summary">
       <div class="sticky-cart-info">
@@ -199,10 +987,10 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"></div> -->
 
 <!-- Full‑screen Address Modal -->
-<div id="addressFlowModal" class="address-flow-modal fullscreen-modal" style="display: none;">
+<!-- <div id="addressFlowModal" class="address-flow-modal fullscreen-modal" style="display: none;">
   <div class="address-flow-container">
     <div class="address-flow-header">
       <button class="back-arrow-btn" id="backArrowBtn"><i class="fas fa-arrow-left"></i></button>
@@ -276,32 +1064,32 @@
       </div>
     </div>
   </div>
-</div>
+</div> -->
 
 <!-- Offer Detail Modal -->
-<div id="offerDetailModal" class="offer-detail-modal" style="display: none;">
+<!-- <div id="offerDetailModal" class="offer-detail-modal" style="display: none;">
   <div class="offer-detail-container">
     <button class="close-offer-modal" id="closeOfferModal">&times;</button>
     <div id="offerDetailContent"></div>
     <button id="addOfferToCartBtn" class="add-offer-cart-btn">🛒 Add to Cart</button>
   </div>
-</div>
+</div> -->
 
 <!-- Account Modal (Full Screen) -->
-<div id="accountModal" class="account-modal" style="display: none;">
+<!-- <div id="accountModal" class="account-modal" style="display: none;">
   <div class="account-modal-container">
     <div class="account-modal-header">
       <h3><i class="fas fa-user-circle"></i> Account</h3>
       <button class="close-account-modal" id="closeAccountModal">&times;</button>
     </div>
-    <div class="account-modal-body" id="accountModalBody">
+    <div class="account-modal-body" id="accountModalBody"> -->
       <!-- Dynamic content will be inserted here -->
-    </div>
+    <!-- </div>
   </div>
-</div>
+</div> -->
 
 <!-- Bottom Navigation Bar -->
-<div id="bottomNavBar" class="bottom-nav-bar">
+<!-- <div id="bottomNavBar" class="bottom-nav-bar">
   <div class="bottom-nav-inner">
     <button class="bottom-nav-item" data-nav="home">
       <i class="fas fa-home"></i>
@@ -320,4 +1108,4 @@
 
 <script src="script.js"></script>
 </body>
-</html>
+</html> -->
