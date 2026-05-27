@@ -1012,7 +1012,8 @@ function scrollToConfirmButton() {
   }
 }
 
-function initMap() {
+// --- MAP initialization with optional saved location ---
+function initMap(initialLat = null, initialLng = null) {
   if (!document.getElementById('locationMap')) return;
   if (!document.querySelector('link[href*="leaflet.css"]')) {
     const link = document.createElement('link');
@@ -1021,15 +1022,17 @@ function initMap() {
     document.head.appendChild(link);
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload = () => createMap();
+    script.onload = () => createMap(initialLat, initialLng);
     document.head.appendChild(script);
   } else {
-    createMap();
+    createMap(initialLat, initialLng);
   }
 }
 
-function createMap() {
-  map = L.map('locationMap').setView([ADAT_LAT, ADAT_LON], 14);
+function createMap(initialLat = null, initialLng = null) {
+  const centerLat = (initialLat && initialLng) ? initialLat : ADAT_LAT;
+  const centerLng = (initialLat && initialLng) ? initialLng : ADAT_LON;
+  map = L.map('locationMap').setView([centerLat, centerLng], 14);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CartoDB'
   }).addTo(map);
@@ -1041,7 +1044,7 @@ function createMap() {
     fillOpacity: 0.1,
     radius: MAX_DISTANCE_KM * 1000
   }).addTo(map);
-  marker = L.marker(adatCenter, { draggable: true }).addTo(map);
+  marker = L.marker([centerLat, centerLng], { draggable: true }).addTo(map);
   marker.on('dragend', async function(e) {
     const pos = marker.getLatLng();
     const distance = getDistanceKm(ADAT_LAT, ADAT_LON, pos.lat, pos.lng);
@@ -1074,7 +1077,12 @@ function createMap() {
       if (confirmBtn) confirmBtn.disabled = true;
     }
   });
-  attemptAutoLocation();
+  // If we have an initial location, trigger validation
+  if (initialLat && initialLng) {
+    marker.fire('dragend');
+  } else {
+    attemptAutoLocation();
+  }
 }
 
 function attemptAutoLocation() {
@@ -1169,12 +1177,12 @@ function loadSavedCustomerData() {
       const data = JSON.parse(saved);
       if (data.name) customerData.name = data.name;
       if (data.phone) customerData.phone = data.phone;
-      if (data.address && data.location) {
+      if (data.location && data.location.lat) {
         customerData.house = data.house || '';
         customerData.area = data.area || '';
         customerData.landmark = data.landmark || '';
         customerData.addressType = data.addressType || 'Home';
-        customerData.location = data.location || { lat: ADAT_LAT, lng: ADAT_LON, address: 'Adat, Kerala, India' };
+        customerData.location = data.location;
         customerData.useEcoBox = data.useEcoBox || false;
       }
     } catch(e) {}
@@ -1276,7 +1284,12 @@ function startMultiStepFlow() {
     if (phoneInput) phoneInput.value = customerData.phone;
     if (preview) preview.innerHTML = `<strong>Saved address:</strong> ${customerData.house}, ${customerData.area}`;
   }
-  if (!map) initMap();
+  // Initialize map with saved location if exists
+  if (customerData.location && customerData.location.lat) {
+    initMap(customerData.location.lat, customerData.location.lng);
+  } else {
+    initMap();
+  }
 }
 
 function openAddressFlow() {
@@ -1288,9 +1301,16 @@ function openAddressFlow() {
   loadSavedCustomerData();
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'flex';
-  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location.lat;
+  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location && customerData.location.lat;
   if (hasSavedData) {
-    showSavedSummary();
+    // Validate saved location distance
+    const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
+    if (distance <= MAX_DISTANCE_KM) {
+      showSavedSummary();
+    } else {
+      showToast("⚠️ Your saved location is outside delivery area. Please update your location on the map.");
+      startMultiStepFlow();
+    }
   } else {
     startMultiStepFlow();
   }
@@ -1315,6 +1335,14 @@ function handleBack() {
 }
 
 function sendOrderFromSummary() {
+  // Re-validate distance before sending
+  const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
+  if (distance > MAX_DISTANCE_KM) {
+    showToast("❌ Delivery address is outside our 5 km area. Please update location.");
+    closeAddressFlow();
+    startMultiStepFlow();
+    return;
+  }
   sendFinalWhatsApp();
 }
 
@@ -1550,69 +1578,30 @@ function renderAccountModal() {
             <div class="faq-item"><strong>❓ Can I modify my order after placing?</strong><br>Please contact us immediately via WhatsApp or phone.</div>
           `);
         });
-       document.getElementById('termsBtnLogged')?.addEventListener('click', () => {
-  showStaticContent('Terms & Conditions', `
-    <p><strong>1. Acceptance of Terms</strong><br>
-    By accessing or using Fresh Adat, you agree to comply with these Terms & Conditions.</p>
-
-    <p><strong>2. Product Availability & Pricing</strong><br>
-    Product availability and prices are subject to change without prior notice.</p>
-
-    <p><strong>3. Delivery Policy</strong><br>
-    We currently deliver within selected areas near Adat, Thrissur. Delivery times are approximate and may vary due to traffic, weather, or other conditions.</p>
-
-    <p><strong>4. Payment Methods</strong><br>
-    Payments are accepted through Cash on Delivery, UPI, Google Pay, PhonePe, and Paytm.</p>
-
-    <p><strong>5. Returns & Refunds</strong><br>
-    Customers must report damaged or incorrect items within 2 hours of delivery. Refunds or replacements are subject to verification.</p>
-
-    <p><strong>6. Eco-Box Policy</strong><br>
-    Eco-boxes provided during delivery remain reusable property. Repeated non-return may result in additional charges.</p>
-
-    <p><strong>7. User Information</strong><br>
-    Customers are responsible for providing accurate delivery details and contact information.</p>
-
-    <p><strong>8. Limitation of Liability</strong><br>
-    Fresh Adat shall not be held responsible for delays or interruptions caused by events beyond our reasonable control.</p>
-
-    <p><strong>9. Changes to Terms</strong><br>
-    These Terms & Conditions may be updated periodically without prior notice.</p>
-  `);
-});
-
-document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
-  showStaticContent('Privacy Policy', `
-    <p><strong>1. Information Collection</strong><br>
-    We collect customer information such as name, phone number, address, and order details solely for delivery and customer support purposes.</p>
-
-    <p><strong>2. Location Data</strong><br>
-    Approximate GPS/location data may be used to improve delivery accuracy.</p>
-
-    <p><strong>3. Data Usage</strong><br>
-    Customer information is used only for order processing, communication, and service improvement.</p>
-
-    <p><strong>4. Data Protection</strong><br>
-    We take reasonable measures to protect customer data from unauthorized access.</p>
-
-    <p><strong>5. Third-Party Services</strong><br>
-    Payment providers or map services may process limited information required for their functionality.</p>
-
-    <p><strong>6. Cookies & Local Storage</strong><br>
-    Our website may use cookies or local storage to improve user experience and save cart/preferences.</p>
-
-    <p><strong>7. User Rights</strong><br>
-    Users may request correction or deletion of their stored information by contacting us.</p>
-
-    <p><strong>8. Policy Updates</strong><br>
-    This Privacy Policy may be updated from time to time.</p>
-  `);
-});
+        document.getElementById('termsBtnLogged')?.addEventListener('click', () => {
+          showStaticContent('Terms & Conditions', `
+            <p><strong>1. Acceptance of Terms</strong><br>By using Fresh Adat, you agree to these terms.</p>
+            <p><strong>2. Delivery Policy</strong><br>We deliver within 5 km of Adat. Delivery times may vary.</p>
+            <p><strong>3. Payment</strong><br>Payments are accepted via cash on delivery, Google Pay, PhonePe, Paytm.</p>
+            <p><strong>4. Returns & Refunds</strong><br>Quality issues must be reported within 2 hours of delivery.</p>
+            <p><strong>5. Eco-Box</strong><br>Eco-boxes are reusable. Failure to return may incur additional charges.</p>
+            <p><strong>6. Privacy</strong><br>Your data is safe and never shared with third parties.</p>
+          `);
+        });
+        document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
+          showStaticContent('Privacy Policy', `
+            <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
+            <p><strong>Data Security</strong><br>Your data is stored securely and not shared with third parties.</p>
+            <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
+            <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
+          `);
+        });
         document.getElementById('sellerInfoBtnLogged')?.addEventListener('click', () => {
           showStaticContent('Seller Information', `
             <p><strong>Business Name:</strong> Fresh Adat</p>
             <p><strong>Registered Address:</strong> Adat, Thrissur, Kerala - 680551</p>
-            <p><strong>FSSAI License:</strong>21326197000407</p>
+            <p><strong>GSTIN:</strong> 32ABCDE1234F1Z5</p>
+            <p><strong>FSSAI License:</strong> 12345678901234</p>
             <p><strong>Contact:</strong> +91 94968 40336</p>
             <p><strong>Email:</strong> fresh4adat@gmail.com</p>
           `);
@@ -1732,17 +1721,19 @@ document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
   });
 }
 
+// Simplified login flow that saves profile without placing an order
 function openAddressFlowForLogin() {
   loadSavedCustomerData();
-  addressFlowModal.style.display = 'flex';
-  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location.lat;
+  const modal = document.getElementById('addressFlowModal');
+  if (modal) modal.style.display = 'flex';
+  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location && customerData.location.lat;
   if (hasSavedData) {
     showSavedSummary();
-    const sendBtn = document.getElementById('sendFromSummaryBtn');
-    if (sendBtn) {
-      sendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
-      const oldClick = sendBtn.onclick;
-      sendBtn.onclick = () => {
+    const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
+    if (sendSummaryBtn) {
+      sendSummaryBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
+      sendSummaryBtn.onclick = () => {
+        // Capture latest data from the hidden fields (they are not visible in saved summary, but we can keep current)
         saveCustomerData();
         closeAddressFlow();
         renderAccountModal();
@@ -1755,6 +1746,28 @@ function openAddressFlowForLogin() {
     if (finalSendBtn) {
       finalSendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
       finalSendBtn.onclick = () => {
+        // Gather data from step4 (which is currently shown)
+        const house = document.getElementById('addrHouse')?.value.trim() || '';
+        const area = document.getElementById('addrArea')?.value.trim() || '';
+        const landmark = document.getElementById('addrLandmark')?.value.trim() || '';
+        const name = document.getElementById('custFullName')?.value.trim() || '';
+        const phone = document.getElementById('custPhoneNumber')?.value.trim() || '';
+        const selectedType = document.querySelector('input[name="addrType"]:checked')?.value || 'Home';
+        const useEco = document.getElementById('ecoBoxCheckbox')?.checked || false;
+        
+        customerData.house = house;
+        customerData.area = area;
+        customerData.landmark = landmark;
+        customerData.name = name;
+        customerData.phone = phone;
+        customerData.addressType = selectedType;
+        customerData.useEcoBox = useEco;
+        // Location should have been set in step1 (map)
+        if (!customerData.location.lat) {
+          showToast("Please set your delivery location on the map first");
+          showStep(1);
+          return;
+        }
         saveCustomerData();
         closeAddressFlow();
         renderAccountModal();
