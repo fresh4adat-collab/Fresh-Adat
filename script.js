@@ -1,11 +1,12 @@
-// ----------------------------- CONFIGURATION -----------------------------
-const WHATSAPP_NUMBER = '919496840336';
-const ADAT_LAT = 10.5530;
-const ADAT_LON = 76.1668;
-const MAX_DISTANCE_KM = 5;
-const FREE_DELIVERY_THRESHOLD = 200;
-const MAX_QTY_PER_PRODUCT = 4;
-const ECO_BOX_CHARGE = 10;
+// ----------------------------- CONFIGURATION (overridden by sheet) -----------------------------
+let WHATSAPP_NUMBER = '919496840336';
+let ADAT_LAT = 10.5530;
+let ADAT_LON = 76.1668;
+let MAX_DISTANCE_KM = 5;
+let FREE_DELIVERY_THRESHOLD = 200;
+let MAX_QTY_PER_PRODUCT = 4;
+let ECO_BOX_CHARGE = 10;
+let DELIVERY_CHARGE = 30;   // added when subtotal < FREE_DELIVERY_THRESHOLD
 
 const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
@@ -42,16 +43,16 @@ const FALLBACK_IMAGES = {
   slide2: 'https://via.placeholder.com/800x400?text=Slide+2',
   slide3: 'https://via.placeholder.com/800x400?text=Slide+3',
   'vegitable-fresh': 'https://via.placeholder.com/90?text=Fresh+Veg',
+  'vegitable-fresh-leafs': 'https://via.placeholder.com/90?text=Fresh+Leafs',
   'fruits-fresh': 'https://via.placeholder.com/90?text=Fresh+Fruits',
   diary: 'https://via.placeholder.com/90?text=Dairy',
   meats: 'https://via.placeholder.com/90?text=Meats',
   rice: 'https://via.placeholder.com/90?text=Rice',
-  'vegitable-fresh-leafs': 'https://via.placeholder.com/90?text=Leafy',
+  oils: 'https://via.placeholder.com/90?text=Oils',
+  powders: 'https://via.placeholder.com/90?text=Powders',
   all: 'https://via.placeholder.com/90?text=All',
   offers: 'https://via.placeholder.com/90?text=Offers',
   'cut vegetables': 'https://via.placeholder.com/90?text=Cut',
-  oils: 'https://via.placeholder.com/90?text=Oils',
-  powders: 'https://via.placeholder.com/90?text=Powders',
   organic: 'https://via.placeholder.com/90?text=Organic'
 };
 
@@ -87,6 +88,12 @@ function updateCartCountUI() {
 }
 
 function adjustQuantity(productId, delta) {
+  const product = products.find(p => p.id == productId);
+  if (!product) return;
+  if (product.qty === 0) {
+    showToast(`${product.name} is out of stock`);
+    return;
+  }
   const currentQty = cart[productId] || 0;
   const newQty = currentQty + delta;
   if (newQty <= 0) {
@@ -156,14 +163,32 @@ function productMatchesByTagSubstring(selectedProduct, otherProduct) {
 function createProductCard(p, showQtyControls = true) {
   const qty = cart[p.id] || 0;
   const hasQty = qty > 0;
+  const isOutOfStock = (p.qty === 0);
   const imageUrl = getProductImageUrl(p);
-  const imgHtml = `<div class="product-img"><img src="${imageUrl}" alt="${p.name}" loading="lazy">${p.isOrganic ? '<span class="organic-label">🌿 Organic</span>' : ''}${isCutVegetable(p.category) ? '<span class="cut-label">✂️ Cut</span>' : ''}</div>`;
+  
+  const imgHtml = `<div class="product-img">
+    <img src="${imageUrl}" alt="${p.name}" loading="lazy">
+    ${p.isOrganic ? '<span class="organic-label">🌿 Organic</span>' : ''}
+    ${isCutVegetable(p.category) ? '<span class="cut-label">✂️ Cut</span>' : ''}
+    ${p.label ? `<div class="product-label-badge">${escapeHtml(p.label)}</div>` : ''}
+    ${isOutOfStock ? '<div class="out-of-stock-overlay">Out of Stock</div>' : ''}
+  </div>`;
+  
   let priceHtml = '';
   if (p.discountPrice && p.discountPrice > 0 && p.discountPrice < p.price) {
     priceHtml = `<div class="price-wrapper"><span class="original-price">₹${p.price}</span><span class="discount-price">₹${p.discountPrice}</span></div>`;
   } else {
     priceHtml = `<div class="single-price">₹${p.price}</div>`;
   }
+  
+  if (isOutOfStock) {
+    if (!hasQty || !showQtyControls) {
+      return `<div class="product-card out-of-stock-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<button class="add-button disabled" disabled data-id="${p.id}"><i class="fas fa-plus"></i> Add</button></div></div>`;
+    } else {
+      return `<div class="product-card out-of-stock-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<div class="square-qty-box"><span class="out-of-stock-text">Out of Stock</span></div></div></div>`;
+    }
+  }
+  
   if (!hasQty || !showQtyControls) {
     return `<div class="product-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<button class="add-button" data-id="${p.id}"><i class="fas fa-plus"></i> Add</button></div></div>`;
   } else {
@@ -172,7 +197,7 @@ function createProductCard(p, showQtyControls = true) {
 }
 
 function bindProductEvents(container = document) {
-  container.querySelectorAll('.add-button').forEach(btn => {
+  container.querySelectorAll('.add-button:not(.disabled)').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
     newBtn.addEventListener('click', e => adjustQuantity(parseInt(newBtn.dataset.id), 1));
@@ -314,7 +339,9 @@ function renderOffersPage() {
         isOrganic: false,
         category: 'offers',
         imageUrl: offer.imageUrl,
-        tags: ''
+        tags: '',
+        label: '',
+        qty: 999
       };
       html += createProductCard(fakeProduct, true);
     });
@@ -428,6 +455,19 @@ function renderCustomHomeLayout() {
   const teaserSection = document.getElementById('offersTeaserSection');
   if (teaserSection) teaserSection.style.display = 'none';
   
+  // ---------- ANNOUNCEMENT BANNER (auto-close after 15s) ----------
+  let bannerHtml = '';
+  let closeTimer = null;
+  if (!localStorage.getItem('announcement_closed')) {
+    bannerHtml = `<div id="announcementBanner" class="announcement-banner">
+      <div class="announcement-content">
+        <i class="fas fa-star" style="color: var(--orange);"></i>
+        <span>🌟 New Products Added Daily! ഞങ്ങൾ ദിവസവും പുതിയ ഉൽപ്പന്നങ്ങൾ ചേർക്കുന്നു. നിങ്ങൾ അന്വേഷിക്കുന്ന ഉൽപ്പന്നം ഇപ്പോൾ ലഭ്യമല്ലെങ്കിൽ ഉടൻ തന്നെ ലഭ്യമാക്കുന്നതാണ്. Thank you for your support!</span>
+        <button class="close-banner" id="closeAnnouncementBtn">&times;</button>
+      </div>
+    </div>`;
+  }
+  
   productsGrid.classList.add('block');
   productsGrid.style.display = 'block';
   const sortedAll = [...products].sort((a,b) => getHomeOrderNumber(a.showOnHomeRaw) - getHomeOrderNumber(b.showOnHomeRaw));
@@ -440,8 +480,37 @@ function renderCustomHomeLayout() {
   const slide2Url = getImageUrl('slide2');
   const slide3Url = getImageUrl('slide3');
   const slideshowHtml = `<div class="home-slideshow"><div class="slide active"><img src="${slide1Url}" alt="Fresh vegetables"></div><div class="slide"><img src="${slide2Url}" alt="Organic fruits"></div><div class="slide"><img src="${slide3Url}" alt="Leafy greens"></div><div class="slideshow-dots"></div></div>`;
-  const categoryStripHtml = `<div class="category-strip"><div class="category-square" data-cat-value="vegitable-fresh"><img class="square-img" src="${getImageUrl('vegitable-fresh')}" alt="Fresh Veg"><span class="square-name">Fresh Veg</span></div><div class="category-square" data-cat-value="fruits-fresh"><img class="square-img" src="${getImageUrl('fruits-fresh')}" alt="Fresh Fruits"><span class="square-name">Fresh Fruits</span></div><div class="category-square" data-cat-value="diary"><img class="square-img" src="${getImageUrl('diary')}" alt="Dairy & Egg"><span class="square-name">Dairy & Egg</span></div><div class="category-square" data-cat-value="vegitable-fresh-leafs"><img class="square-img" src="${getImageUrl('vegitable-fresh-leafs')}" alt="Fresh Leafs"><span class="square-name">Fresh Leafs</span></div><div class="category-square" data-cat-value="meats"><img class="square-img" src="${getImageUrl('meats')}" alt="Meats"><span class="square-name">Meats</span></div><div class="category-square" data-cat-value="rice"><img class="square-img" src="${getImageUrl('rice')}" alt="Atta & Rice"><span class="square-name">Atta & Rice</span></div></div>`;
-  productsGrid.innerHTML = firstFourHtml + slideshowHtml + categoryStripHtml;
+  const categoryStripHtml = `<div class="category-strip"><div class="category-square" data-cat-value="vegitable-fresh"><img class="square-img" src="${getImageUrl('vegitable-fresh')}" alt="Fresh Veg"><span class="square-name">Fresh Veg</span></div><div class="category-square" data-cat-value="vegitable-fresh-leafs"><img class="square-img" src="${getImageUrl('vegitable-fresh-leafs')}" alt="Fresh Leafs"><span class="square-name">Fresh Leafs</span></div><div class="category-square" data-cat-value="fruits-fresh"><img class="square-img" src="${getImageUrl('fruits-fresh')}" alt="Fresh Fruits"><span class="square-name">Fresh Fruits</span></div><div class="category-square" data-cat-value="diary"><img class="square-img" src="${getImageUrl('diary')}" alt="Dairy & Egg"><span class="square-name">Dairy & Egg</span></div><div class="category-square" data-cat-value="meats"><img class="square-img" src="${getImageUrl('meats')}" alt="Meats"><span class="square-name">Meats</span></div><div class="category-square" data-cat-value="rice"><img class="square-img" src="${getImageUrl('rice')}" alt="Atta & Rice"><span class="square-name">Atta & Rice</span></div></div>`;
+  
+  // Insert banner at the top
+  productsGrid.innerHTML = bannerHtml + firstFourHtml + slideshowHtml + categoryStripHtml;
+  
+  // Handle banner close (manual or auto)
+  if (bannerHtml) {
+    setTimeout(() => {
+      const banner = document.getElementById('announcementBanner');
+      const closeBtn = document.getElementById('closeAnnouncementBtn');
+      
+      const removeBanner = () => {
+        if (banner && banner.parentNode) banner.remove();
+        if (closeTimer) clearTimeout(closeTimer);
+        localStorage.setItem('announcement_closed', 'true');
+      };
+      
+      // Auto-close after 15 seconds
+      closeTimer = setTimeout(() => {
+        removeBanner();
+      }, 15000);
+      
+      // Manual close
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          removeBanner();
+        });
+      }
+    }, 0);
+  }
+  
   bindProductEvents(productsGrid);
   initSlideshow();
   attachCategorySquareEvents();
@@ -1003,6 +1072,11 @@ function getCartTotalSavings() {
   return savings;
 }
 
+function getDeliveryCharge(subtotal) {
+  if (subtotal >= FREE_DELIVERY_THRESHOLD) return 0;
+  return DELIVERY_CHARGE;
+}
+
 function scrollToConfirmButton() {
   const btn = document.getElementById('confirmLocationBtn');
   if (btn && !btn.disabled) {
@@ -1012,7 +1086,6 @@ function scrollToConfirmButton() {
   }
 }
 
-// --- MAP initialization with optional saved location ---
 function initMap(initialLat = null, initialLng = null) {
   if (!document.getElementById('locationMap')) return;
   if (!document.querySelector('link[href*="leaflet.css"]')) {
@@ -1077,7 +1150,6 @@ function createMap(initialLat = null, initialLng = null) {
       if (confirmBtn) confirmBtn.disabled = true;
     }
   });
-  // If we have an initial location, trigger validation
   if (initialLat && initialLng) {
     marker.fire('dragend');
   } else {
@@ -1152,8 +1224,9 @@ function showStep(step) {
     const confirmCustomer = document.getElementById('confirmCustomer');
     if (confirmCustomer) confirmCustomer.innerHTML = `${customerData.name}<br>📞 ${customerData.phone}`;
     let subtotal = getCartSubtotal();
+    let deliveryCharge = getDeliveryCharge(subtotal);
     let ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
-    let total = subtotal + ecoCharge;
+    let total = subtotal + deliveryCharge + ecoCharge;
     let summaryHtml = '';
     Object.keys(cart).forEach(id => {
       const p = products.find(x => x.id == id);
@@ -1165,6 +1238,10 @@ function showStep(step) {
     if (orderSummary) orderSummary.innerHTML = summaryHtml;
     const ecoLine = document.getElementById('ecoBoxChargeLine');
     if (ecoLine) ecoLine.style.display = customerData.useEcoBox ? 'block' : 'none';
+    const deliveryLine = document.getElementById('deliveryChargeLine');
+    if (deliveryLine) deliveryLine.style.display = deliveryCharge > 0 ? 'block' : 'none';
+    const deliverySpan = document.getElementById('deliveryChargeAmount');
+    if (deliverySpan) deliverySpan.textContent = `₹${deliveryCharge}`;
     const finalTotal = document.getElementById('confirmFinalTotal');
     if (finalTotal) finalTotal.innerHTML = `Total: ₹${total}`;
   }
@@ -1216,8 +1293,9 @@ function showSavedSummary() {
 
   const subtotal = getCartSubtotal();
   const totalSavings = getCartTotalSavings();
+  const deliveryCharge = getDeliveryCharge(subtotal);
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
-  const total = subtotal + ecoCharge;
+  const total = subtotal + deliveryCharge + ecoCharge;
 
   let itemsHtml = '';
   Object.keys(cart).forEach(id => {
@@ -1245,6 +1323,7 @@ function showSavedSummary() {
       <div class="order-totals">
         <div>Subtotal: ₹${subtotal}</div>
         ${totalSavings > 0 ? `<div>Savings: -₹${totalSavings}</div>` : ''}
+        ${deliveryCharge > 0 ? `<div>Delivery Charge: ₹${deliveryCharge}</div>` : ''}
         ${customerData.useEcoBox ? `<div>Eco-box: +₹${ECO_BOX_CHARGE}</div>` : ''}
         <div class="total"><strong>Total: ₹${total}</strong></div>
       </div>
@@ -1284,7 +1363,6 @@ function startMultiStepFlow() {
     if (phoneInput) phoneInput.value = customerData.phone;
     if (preview) preview.innerHTML = `<strong>Saved address:</strong> ${customerData.house}, ${customerData.area}`;
   }
-  // Initialize map with saved location if exists
   if (customerData.location && customerData.location.lat) {
     initMap(customerData.location.lat, customerData.location.lng);
   } else {
@@ -1303,7 +1381,6 @@ function openAddressFlow() {
   if (modal) modal.style.display = 'flex';
   const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location && customerData.location.lat;
   if (hasSavedData) {
-    // Validate saved location distance
     const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
     if (distance <= MAX_DISTANCE_KM) {
       showSavedSummary();
@@ -1335,7 +1412,6 @@ function handleBack() {
 }
 
 function sendOrderFromSummary() {
-  // Re-validate distance before sending
   const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
   if (distance > MAX_DISTANCE_KM) {
     showToast("❌ Delivery address is outside our 5 km area. Please update location.");
@@ -1348,8 +1424,9 @@ function sendOrderFromSummary() {
 
 function sendFinalWhatsApp() {
   const subtotal = getCartSubtotal();
+  const deliveryCharge = getDeliveryCharge(subtotal);
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
-  const total = subtotal + ecoCharge;
+  const total = subtotal + deliveryCharge + ecoCharge;
   const fullAddress = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
   const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
 
@@ -1361,8 +1438,9 @@ function sendFinalWhatsApp() {
     itemsList += `  🛒 ${p.name} x ${qty} ${p.unit} = ₹${price * qty}\n`;
   });
   const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: ₹${ECO_BOX_CHARGE}\n` : '';
+  const deliveryLine = deliveryCharge > 0 ? `🚚 Delivery charge: ₹${deliveryCharge}\n` : '';
   const orderId = 'ORD' + Date.now().toString().slice(-6);
-  const msg = `🌿 *FRESH ADAT ORDER* 🌿\n━━━━━━━━━━━━━━━━━━\n🆔 Order ID: ${orderId}\n👤 Customer: ${customerData.name}\n📞 Phone: ${customerData.phone}\n📍 Address: ${fullAddress}\n🏷️ Type: ${customerData.addressType}\n🗺️ Map: ${mapLink}\n\n🛍️ *Items:*\n${itemsList}${ecoLine}💰 Subtotal: ₹${subtotal}\n💵 Total: ₹${total}\n\n✅ Delivered in reusable eco‑box\n♻️ Please return the empty box after delivery\n📝 Note: Thank you for ordering with Fresh Adat!`;
+  const msg = `🌿 *FRESH ADAT ORDER* 🌿\n━━━━━━━━━━━━━━━━━━\n🆔 Order ID: ${orderId}\n👤 Customer: ${customerData.name}\n📞 Phone: ${customerData.phone}\n📍 Address: ${fullAddress}\n🏷️ Type: ${customerData.addressType}\n🗺️ Map: ${mapLink}\n\n🛍️ *Items:*\n${itemsList}${deliveryLine}${ecoLine}💰 Subtotal: ₹${subtotal}\n💵 Total: ₹${total}\n\n✅ Delivered in reusable eco‑box\n♻️ Please return the empty box after delivery\n📝 Note: Thank you for ordering with Fresh Adat!`;
   window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   cart = {};
   updateCartCountUI();
@@ -1500,7 +1578,6 @@ function renderAccountModal() {
     try {
       const user = JSON.parse(saved);
       if (user.name && user.phone && user.location && user.house) {
-        // Logged in user
         const fullAddress = `${user.house}, ${user.area}${user.landmark ? ', ' + user.landmark : ''}, ${user.location.address}`;
         body.innerHTML = `
           <div class="user-info" style="text-align: center; padding: 20px;">
@@ -1721,7 +1798,6 @@ function renderAccountModal() {
   });
 }
 
-// Simplified login flow that saves profile without placing an order
 function openAddressFlowForLogin() {
   loadSavedCustomerData();
   const modal = document.getElementById('addressFlowModal');
@@ -1733,7 +1809,6 @@ function openAddressFlowForLogin() {
     if (sendSummaryBtn) {
       sendSummaryBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
       sendSummaryBtn.onclick = () => {
-        // Capture latest data from the hidden fields (they are not visible in saved summary, but we can keep current)
         saveCustomerData();
         closeAddressFlow();
         renderAccountModal();
@@ -1746,7 +1821,6 @@ function openAddressFlowForLogin() {
     if (finalSendBtn) {
       finalSendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
       finalSendBtn.onclick = () => {
-        // Gather data from step4 (which is currently shown)
         const house = document.getElementById('addrHouse')?.value.trim() || '';
         const area = document.getElementById('addrArea')?.value.trim() || '';
         const landmark = document.getElementById('addrLandmark')?.value.trim() || '';
@@ -1762,7 +1836,6 @@ function openAddressFlowForLogin() {
         customerData.phone = phone;
         customerData.addressType = selectedType;
         customerData.useEcoBox = useEco;
-        // Location should have been set in step1 (map)
         if (!customerData.location.lat) {
           showToast("Please set your delivery location on the map first");
           showStep(1);
@@ -1777,18 +1850,89 @@ function openAddressFlowForLogin() {
   }
 }
 
-// ========== LOAD DATA ==========
+// ========== LOAD DATA (WITH CONFIG, ALL PRODUCT SHEETS, OFFERS) ==========
 function loadData() {
   const baseUrl = 'https://opensheet.elk.sh/1FEpSYZlTrlp0BYPEcVCYISC0kgXpt_3Fcw5XAcjLOvs';
-  Promise.all([
-    fetch(`${baseUrl}/Sheet1`).then(res => res.json()),
-    fetch(`${baseUrl}/Sheet2`).then(res => res.json()),
-    fetch(`${baseUrl}/Sheet4`).then(res => res.json()),
+  
+  // First fetch config from "Config" sheet
+  fetch(`${baseUrl}/Config`)
+    .then(res => res.json())
+    .then(configRows => {
+      if (configRows && configRows.length) {
+        configRows.forEach(row => {
+          const key = row.key?.trim();
+          const val = row.value?.trim();
+          if (!key || !val) return;
+          switch(key.toLowerCase()) {
+            case 'whatsapp_number':
+              WHATSAPP_NUMBER = val;
+              break;
+            case 'adat_lat':
+              ADAT_LAT = parseFloat(val);
+              break;
+            case 'adat_lon':
+              ADAT_LON = parseFloat(val);
+              break;
+            case 'max_distance_km':
+              MAX_DISTANCE_KM = parseFloat(val);
+              break;
+            case 'free_delivery_threshold':
+              FREE_DELIVERY_THRESHOLD = parseFloat(val);
+              break;
+            case 'max_qty_per_product':
+              MAX_QTY_PER_PRODUCT = parseInt(val, 10);
+              break;
+            case 'eco_box_charge':
+              ECO_BOX_CHARGE = parseFloat(val);
+              break;
+            case 'delivery_charge':
+              DELIVERY_CHARGE = parseFloat(val);
+              break;
+          }
+        });
+        console.log('✅ Config loaded from sheet');
+      }
+    })
+    .catch(err => console.warn('⚠️ Config sheet not found, using defaults', err))
+    .finally(() => {
+      loadProductsAndOffers(baseUrl);
+    });
+}
+
+function loadProductsAndOffers(baseUrl) {
+  // All product sheets mapping
+  const sheetMapping = [
+    { sheet: 'Sheet1', category: 'vegitable-fresh', isOrganic: false },
+    { sheet: 'Sheet10', category: 'vegitable-fresh-leafs', isOrganic: false },
+    { sheet: 'Sheet11', category: 'fruits-fresh', isOrganic: false },
+    { sheet: 'Sheet12', category: 'diary', isOrganic: false },
+    { sheet: 'Sheet13', category: 'meats', isOrganic: false },
+    { sheet: 'Sheet14', category: 'rice', isOrganic: false },
+    { sheet: 'Sheet15', category: 'oils', isOrganic: false },
+    { sheet: 'Sheet16', category: 'powders', isOrganic: false },
+    { sheet: 'Sheet2', category: null, isOrganic: true },       // category from sheet column
+    { sheet: 'Sheet4', category: 'cut-vegetable', isOrganic: false }
+  ];
+  
+  const fetchPromises = sheetMapping.map(({ sheet }) =>
+    fetch(`${baseUrl}/${sheet}`)
+      .then(res => res.json())
+      .catch(() => [])
+  );
+  
+  fetchPromises.push(
     fetch(`${baseUrl}/Sheet5`).then(res => res.json()).catch(() => []),
     fetch(`${baseUrl}/Sheet6`).then(res => res.json()).catch(() => [])
-  ]).then(([sheet1, sheet2, sheet4, sheet5, sheet6]) => {
-    if (sheet5 && sheet5.length) {
-      sheet5.forEach(row => {
+  );
+  
+  Promise.all(fetchPromises).then(results => {
+    const productSheets = results.slice(0, sheetMapping.length);
+    const sheet5Data = results[sheetMapping.length];
+    const sheet6Data = results[sheetMapping.length + 1];
+    
+    // Image mapping
+    if (sheet5Data && sheet5Data.length) {
+      sheet5Data.forEach(row => {
         let nameKey = null, url = null;
         for (let [col, val] of Object.entries(row)) {
           if (col.toLowerCase() === 'name') nameKey = val;
@@ -1797,12 +1941,30 @@ function loadData() {
         if (nameKey && url && url.startsWith('http')) imageMap[nameKey.toLowerCase()] = url;
       });
     }
-    const processSheet = (items, startId, isOrganic) => {
-      return (items || []).map((item, idx) => {
+    
+    const processSheet = (rows, startId, defaultCategory, isOrganic) => {
+      return (rows || []).filter(item => {
+        const qtyRaw = item.qty || item.Qty || '';
+        if (typeof qtyRaw === 'string' && qtyRaw.toLowerCase() === 'n') return false;
+        return true;
+      }).map((item, idx) => {
+        let category = defaultCategory;
+        if (defaultCategory === null) {
+          category = (item.Category || 'organic').trim().toLowerCase();
+        }
         let tags = item.Tags || '';
         if (!tags) {
           let nameWords = (item.Name || '').toLowerCase().split(' ');
-          tags = nameWords.concat(item.Category ? [item.Category.toLowerCase()] : []).join(',');
+          tags = nameWords.concat(category).join(',');
+        }
+        let qtyValue = item.qty || item.Qty;
+        let productQty = 1;
+        if (qtyValue !== undefined && qtyValue !== '') {
+          if (!isNaN(Number(qtyValue))) {
+            productQty = Number(qtyValue);
+          } else {
+            productQty = 0;
+          }
         }
         return {
           id: startId + idx,
@@ -1810,22 +1972,33 @@ function loadData() {
           price: Number(item.Price) || 0,
           discountPrice: item['Price-off'] ? Number(item['Price-off']) : 0,
           unit: item.Unit || 'unit',
-          category: (item.Category || 'vegitable-fresh').trim().toLowerCase(),
+          category: category,
           imageUrl: item.Emoji || '',
           showOnHomeRaw: item.ShowOnHome || `yes${idx+1}`,
           offer: (item.ShowOnHome || '').toLowerCase().startsWith('yes'),
           isOrganic: isOrganic,
-          tags: tags.toLowerCase()
+          tags: tags.toLowerCase(),
+          label: item.Label || '',
+          qty: productQty
         };
       });
     };
-    const fresh = processSheet(sheet1, 1, false);
-    const organic = processSheet(sheet2, 100, true);
-    const cut = processSheet(sheet4, 200, false);
-    products = [...fresh, ...organic, ...cut];
-
-    if (sheet6 && sheet6.length) {
-      offers = sheet6.map((row, idx) => {
+    
+    let allProducts = [];
+    let idCounter = 1;
+    
+    sheetMapping.forEach(({ sheet, category, isOrganic }, idx) => {
+      const rows = productSheets[idx];
+      const productsFromSheet = processSheet(rows, idCounter, category, isOrganic);
+      allProducts.push(...productsFromSheet);
+      idCounter += productsFromSheet.length + 100;
+    });
+    
+    products = allProducts;
+    
+    // Offers from Sheet6
+    if (sheet6Data && sheet6Data.length) {
+      offers = sheet6Data.map((row, idx) => {
         const isSlide = row.is_slide && row.is_slide.toString().toLowerCase() === 'true';
         return {
           id: idx,
@@ -1841,28 +2014,24 @@ function loadData() {
           imageUrl: row.image_url || getImageUrl(row.offer_name)
         };
       });
+    } else {
+      offers = [];
     }
+    
     renderCategories();
     renderProducts();
     updateStickyCartBar();
   }).catch(err => {
     console.error("Sheet fetch error, using fallback data:", err);
     products = [
-      { id:1, name:'Fresh Tomato', price:40, discountPrice:35, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes1', offer:true, isOrganic:false, tags:'tomato, fresh, vegetable' },
-      { id:2, name:'Organic Apple', price:120, discountPrice:100, unit:'kg', category:'fruits-fresh', showOnHomeRaw:'yes2', offer:true, isOrganic:true, tags:'apple, organic, fruit' },
-      { id:3, name:'Carrot', price:45, discountPrice:0, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:false, isOrganic:false, tags:'carrot, root vegetable' },
-      { id:4, name:'Broccoli', price:80, discountPrice:70, unit:'piece', category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:true, isOrganic:true, tags:'broccoli, green vegetable' },
-      { id:5, name:'Lady Finger (Okra)', price:55, discountPrice:50, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:false, tags:'lady finger, okra, bhindi' },
-      { id:6, name:'Milk (1L)', price:60, discountPrice:55, unit:'liter', category:'diary', showOnHomeRaw:'yes6', offer:true, isOrganic:false, tags:'milk, dairy' },
-      { id:7, name:'Chicken Breast', price:250, discountPrice:230, unit:'kg', category:'meats', showOnHomeRaw:'yes7', offer:true, isOrganic:false, tags:'chicken, meat' },
-      { id:8, name:'Basmati Rice', price:180, discountPrice:160, unit:'kg', category:'rice', showOnHomeRaw:'yes8', offer:true, isOrganic:false, tags:'rice, basmati' },
-      { id:9, name:'Orange', price:90, discountPrice:80, unit:'kg', category:'fruits-fresh', showOnHomeRaw:'yes9', offer:true, isOrganic:true, tags:'orange, citrus' },
-      { id:10, name:'Cucumber', price:35, discountPrice:0, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes10', offer:false, isOrganic:false, tags:'cucumber, salad' },
-      { id:11, name:'Eggs (6 pcs)', price:45, discountPrice:42, unit:'pack', category:'diary', showOnHomeRaw:'yes11', offer:true, isOrganic:false, tags:'eggs, protein' },
-      { id:12, name:'Fish Fillet', price:320, discountPrice:290, unit:'kg', category:'meats', showOnHomeRaw:'yes12', offer:true, isOrganic:false, tags:'fish, seafood' },
-      { id:13, name:'Wheat Atta', price:220, discountPrice:200, unit:'kg', category:'rice', showOnHomeRaw:'yes13', offer:true, isOrganic:false, tags:'atta, wheat, flour' },
-      { id:14, name:'Pomegranate', price:110, discountPrice:95, unit:'kg', category:'fruits-fresh', showOnHomeRaw:'yes14', offer:true, isOrganic:true, tags:'pomegranate, fruit' }
+      { id:1, name:'Fresh Tomato', price:40, discountPrice:35, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes1', offer:true, isOrganic:false, tags:'tomato', label:'', qty:10 },
+      { id:2, name:'Onion', price:40, discountPrice:0, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes2', offer:false, isOrganic:false, tags:'onion', label:'', qty:0 },
+      { id:3, name:'Lady Finger', price:70, discountPrice:60, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:true, isOrganic:false, tags:'okra', label:'buy 1 get 1', qty:5 },
+      { id:4, name:'Carrot', price:45, discountPrice:0, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:false, isOrganic:false, tags:'carrot', label:'', qty:3 },
+      { id:5, name:'Broccoli', price:80, discountPrice:70, unit:'piece', category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:true, tags:'broccoli', label:'', qty:2 },
+      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'bunch', category:'vegitable-fresh-leafs', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8 }
     ];
+    offers = [];
     renderCategories();
     renderProducts();
     updateStickyCartBar();
@@ -1972,7 +2141,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initAddressFlow();
   loadData();
 
-  // Offer modal listeners
   const offerModal = document.getElementById('offerDetailModal');
   const closeOfferModalBtn = document.getElementById('closeOfferModal');
   const addOfferBtn = document.getElementById('addOfferToCartBtn');
@@ -1980,21 +2148,18 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addOfferBtn) addOfferBtn.addEventListener('click', addOfferToCart);
   if (offerModal) offerModal.addEventListener('click', (e) => { if (e.target === offerModal) closeOfferModal(); });
 
-  // ========== BOTTOM NAVIGATION BAR ==========
+  // Bottom navigation bar
   const bottomNavBar = document.getElementById('bottomNavBar');
   let lastScrollTop = 0;
   let scrollTimeout;
 
   function handleBottomBar() {
     if (!bottomNavBar) return;
-    
     if (document.body.classList.contains('cart-not-empty')) {
       bottomNavBar.classList.remove('visible');
       return;
     }
-    
     const currentScroll = window.scrollY || document.documentElement.scrollTop;
-    
     if (currentScroll < lastScrollTop) {
       bottomNavBar.classList.add('visible');
     } else if (currentScroll > lastScrollTop) {
@@ -2002,7 +2167,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (currentScroll === 0) {
       bottomNavBar.classList.add('visible');
     }
-    
     lastScrollTop = currentScroll <= 0 ? 0 : currentScroll;
   }
 
@@ -2038,7 +2202,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ========== ACCOUNT MODAL CLOSE ==========
   const accountModal = document.getElementById('accountModal');
   const closeAccountModalBtn = document.getElementById('closeAccountModal');
   if (closeAccountModalBtn) closeAccountModalBtn.addEventListener('click', closeAccountModalFunc);
@@ -2046,7 +2209,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === accountModal) closeAccountModalFunc();
   });
 
-  // PWA install banner
   let deferredPrompt;
   const installBanner = document.getElementById('installBanner');
   const installBtn = document.getElementById('installAppBtn');
