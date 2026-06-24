@@ -6,7 +6,8 @@ let MAX_DISTANCE_KM = 5;
 let FREE_DELIVERY_THRESHOLD = 200;
 let MAX_QTY_PER_PRODUCT = 4;
 let ECO_BOX_CHARGE = 10;
-let DELIVERY_CHARGE = 30;   // added when subtotal < FREE_DELIVERY_THRESHOLD
+let DELIVERY_CHARGE = 30;
+let OPENING_HOURS = []; // array of { start: minutes, end: minutes }
 
 const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
@@ -17,6 +18,8 @@ let cart = {};
 let selectedCat = 'All';
 let searchTerm = '';
 let selectedSuggestionProduct = null;
+let isLoginMode = false;
+let isStoreOpen = true; // will be set after config load
 
 let productsGrid, catRow, cartCountSpan, cartOverlay, cartPanel, cartItems, cartFooter, footerItems, footerTotal;
 let toastEl;
@@ -38,6 +41,11 @@ let currentOffer = null;
 let offerTimerInterval = null;
 let homeTimerInterval = null;
 
+// Product detail modal
+let productDetailModal, slideshowImages, slideshowDots, detailName, detailUnit, detailPrice, detailHighlight, detailDescription, detailAddBtn;
+let slideshowIndex = 0;
+let slideshowImagesArray = [];
+
 const FALLBACK_IMAGES = {
   slide1: 'https://via.placeholder.com/800x400?text=Slide+1',
   slide2: 'https://via.placeholder.com/800x400?text=Slide+2',
@@ -56,7 +64,108 @@ const FALLBACK_IMAGES = {
   organic: 'https://via.placeholder.com/90?text=Organic'
 };
 
-// ========== HELPER FUNCTIONS ==========
+// ========== TIME HELPERS ==========
+function parseOpeningHours(str) {
+  if (!str) return [];
+  const intervals = str.split(',').map(s => s.trim());
+  const result = [];
+  for (let interval of intervals) {
+    // expected format: "6-8" or "6-8am" or "17-20"
+    let parts = interval.split('-');
+    if (parts.length !== 2) continue;
+    let start = parseTime(parts[0]);
+    let end = parseTime(parts[1]);
+    if (start !== null && end !== null) {
+      result.push({ start, end });
+    }
+  }
+  return result;
+}
+
+function parseTime(str) {
+  str = str.trim().toLowerCase();
+  let hours = 0, minutes = 0;
+  let ampm = 1; // 1 for am, 2 for pm
+  if (str.includes('am')) {
+    ampm = 1;
+    str = str.replace('am', '').trim();
+  } else if (str.includes('pm')) {
+    ampm = 2;
+    str = str.replace('pm', '').trim();
+  }
+  // if no am/pm, assume 24-hour if number >= 12 else 12-hour? we'll treat as 24-hour if no am/pm
+  let parts = str.split(':');
+  if (parts.length === 1) {
+    hours = parseInt(parts[0]);
+    minutes = 0;
+  } else if (parts.length === 2) {
+    hours = parseInt(parts[0]);
+    minutes = parseInt(parts[1]);
+  } else {
+    return null;
+  }
+  if (isNaN(hours) || isNaN(minutes)) return null;
+  if (ampm === 2 && hours < 12) hours += 12;
+  if (ampm === 1 && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
+function isStoreOpenNow() {
+  if (!OPENING_HOURS || OPENING_HOURS.length === 0) return true; // if not set, assume open
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  for (let slot of OPENING_HOURS) {
+    if (currentMinutes >= slot.start && currentMinutes < slot.end) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getStoreStatusMessage() {
+  if (!OPENING_HOURS || OPENING_HOURS.length === 0) return '';
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  // find next opening time
+  let nextOpen = null;
+  let nextOpenDiff = Infinity;
+  for (let slot of OPENING_HOURS) {
+    if (currentMinutes < slot.start) {
+      let diff = slot.start - currentMinutes;
+      if (diff < nextOpenDiff) {
+        nextOpenDiff = diff;
+        nextOpen = slot.start;
+      }
+    }
+  }
+  if (nextOpen === null) {
+    // if after all slots, next is first slot next day
+    const firstSlot = OPENING_HOURS[0];
+    nextOpen = firstSlot.start + 24 * 60;
+  }
+  const nextOpenDate = new Date();
+  nextOpenDate.setHours(0, 0, 0, 0);
+  nextOpenDate.setMinutes(nextOpen % (24*60));
+  nextOpenDate.setHours(Math.floor(nextOpen / 60));
+  const openTimeStr = nextOpenDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `Store is currently closed. Opens at ${openTimeStr}. Please check back later.`;
+}
+
+// ========== LOADING OVERLAY ==========
+function showLoadingOverlay(text = 'Fetching your location…') {
+  const overlay = document.getElementById('loadingOverlay');
+  if (!overlay) return;
+  const textEl = overlay.querySelector('.loader-text');
+  if (textEl) textEl.innerHTML = `<i class="fas fa-location-dot"></i> ${text}`;
+  overlay.classList.add('active');
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.classList.remove('active');
+}
+
+// ========== HELPERS ==========
 function getDistanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -79,12 +188,21 @@ function showToast(msg) {
   if (!toastEl) return;
   toastEl.textContent = msg;
   toastEl.classList.add('show');
-  setTimeout(() => toastEl.classList.remove('show'), 3000);
+  clearTimeout(toastEl._hide);
+  toastEl._hide = setTimeout(() => toastEl.classList.remove('show'), 3000);
 }
 
 function updateCartCountUI() {
   const total = Object.values(cart).reduce((a, b) => a + b, 0);
   if (cartCountSpan) cartCountSpan.textContent = total;
+}
+
+function getCart() {
+  try { return JSON.parse(localStorage.getItem('freshAdatCart')) || {}; } catch { return {}; }
+}
+
+function saveCart(c) {
+  localStorage.setItem('freshAdatCart', JSON.stringify(c));
 }
 
 function adjustQuantity(productId, delta) {
@@ -104,6 +222,7 @@ function adjustQuantity(productId, delta) {
   } else {
     cart[productId] = newQty;
   }
+  saveCart(cart);
   updateCartCountUI();
   renderProducts();
   if (cartPanel && cartPanel.classList.contains('open')) renderCart();
@@ -160,6 +279,124 @@ function productMatchesByTagSubstring(selectedProduct, otherProduct) {
   return nameWords.some(word => otherTags.includes(word));
 }
 
+// ========== PRODUCT DETAIL MODAL ==========
+function openProductDetail(productId) {
+  const product = products.find(p => p.id == productId);
+  if (!product) return;
+  const modal = document.getElementById('productDetailModal');
+  if (!modal) return;
+
+  detailName.textContent = product.name;
+  detailUnit.textContent = product.unit;
+  detailUnit.className = 'product-detail-unit highlight-unit';
+
+  let priceHtml = '';
+  if (product.discountPrice && product.discountPrice > 0 && product.discountPrice < product.price) {
+    priceHtml = `<span class="original-price">₹${product.price}</span> <span class="discount-price">₹${product.discountPrice}</span>`;
+  } else {
+    priceHtml = `<span class="single-price">₹${product.price}</span>`;
+  }
+  detailPrice.innerHTML = priceHtml;
+
+  if (product.highlight) {
+    detailHighlight.textContent = product.highlight;
+    detailHighlight.style.display = 'block';
+  } else {
+    detailHighlight.style.display = 'none';
+  }
+
+  detailDescription.textContent = product.description || 'Fresh and high quality produce.';
+
+  const mainImg = getProductImageUrl(product);
+  let otherImages = [];
+  if (product.othr_img && typeof product.othr_img === 'string') {
+    otherImages = product.othr_img.split(',').map(url => url.trim()).filter(url => url.startsWith('http'));
+  }
+  const allImages = [mainImg, ...otherImages.slice(0, 2)];
+  slideshowImagesArray = [...new Set(allImages)];
+  if (slideshowImagesArray.length === 0) {
+    slideshowImagesArray = [getImageUrl('organic')];
+  }
+
+  slideshowIndex = 0;
+  renderSlideshow();
+
+  detailAddBtn.dataset.productId = product.id;
+
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function renderSlideshow() {
+  const container = slideshowImages;
+  const dotsContainer = slideshowDots;
+  if (!container || !dotsContainer) return;
+
+  container.innerHTML = slideshowImagesArray.map((img, idx) => `
+    <div class="slide-image ${idx === 0 ? 'active' : ''}">
+      <img src="${img}" alt="Product image ${idx+1}" loading="lazy">
+    </div>
+  `).join('');
+
+  dotsContainer.innerHTML = slideshowImagesArray.map((_, idx) => `
+    <span class="dot ${idx === 0 ? 'active' : ''}" data-index="${idx}"></span>
+  `).join('');
+
+  dotsContainer.querySelectorAll('.dot').forEach(dot => {
+    dot.addEventListener('click', () => {
+      const idx = parseInt(dot.dataset.index);
+      goToSlide(idx);
+    });
+  });
+
+  document.getElementById('slideshowPrev').onclick = () => {
+    goToSlide(slideshowIndex - 1 < 0 ? slideshowImagesArray.length - 1 : slideshowIndex - 1);
+  };
+  document.getElementById('slideshowNext').onclick = () => {
+    goToSlide((slideshowIndex + 1) % slideshowImagesArray.length);
+  };
+
+  if (window._slideshowInterval) clearInterval(window._slideshowInterval);
+  if (slideshowImagesArray.length > 1) {
+    window._slideshowInterval = setInterval(() => {
+      goToSlide((slideshowIndex + 1) % slideshowImagesArray.length);
+    }, 4000);
+  }
+}
+
+function goToSlide(index) {
+  if (index < 0 || index >= slideshowImagesArray.length) return;
+  slideshowIndex = index;
+
+  const container = slideshowImages;
+  const dots = slideshowDots.querySelectorAll('.dot');
+  const images = container.querySelectorAll('.slide-image');
+
+  images.forEach((img, i) => img.classList.toggle('active', i === index));
+  dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+}
+
+function closeProductDetail() {
+  const modal = document.getElementById('productDetailModal');
+  if (modal) {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+  if (window._slideshowInterval) {
+    clearInterval(window._slideshowInterval);
+    window._slideshowInterval = null;
+  }
+}
+
+function addProductFromDetail() {
+  const productId = parseInt(detailAddBtn.dataset.productId);
+  if (productId) {
+    adjustQuantity(productId, 1);
+    closeProductDetail();
+  }
+}
+
+// ========== PRODUCT CARD CREATION ==========
 function createProductCard(p, showQtyControls = true) {
   const qty = cart[p.id] || 0;
   const hasQty = qty > 0;
@@ -181,35 +418,113 @@ function createProductCard(p, showQtyControls = true) {
     priceHtml = `<div class="single-price">₹${p.price}</div>`;
   }
   
+  let cardHtml = `<div class="product-card" data-product-id="${p.id}" data-name="${escapeHtml(p.name)}">`;
+  cardHtml += imgHtml;
+  cardHtml += `<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}`;
+  
   if (isOutOfStock) {
     if (!hasQty || !showQtyControls) {
-      return `<div class="product-card out-of-stock-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<button class="add-button disabled" disabled data-id="${p.id}"><i class="fas fa-plus"></i> Add</button></div></div>`;
+      cardHtml += `<button class="add-button disabled" disabled data-id="${p.id}"><i class="fas fa-plus"></i> Add</button>`;
     } else {
-      return `<div class="product-card out-of-stock-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<div class="square-qty-box"><span class="out-of-stock-text">Out of Stock</span></div></div></div>`;
+      cardHtml += `<div class="square-qty-box"><span class="out-of-stock-text">Out of Stock</span></div>`;
+    }
+  } else if (!hasQty || !showQtyControls) {
+    cardHtml += `<button class="add-button" data-id="${p.id}"><i class="fas fa-plus"></i> Add</button>`;
+  } else {
+    cardHtml += `<div class="square-qty-box"><button class="qty-square-btn" data-id="${p.id}" data-delta="-1"><i class="fas fa-minus"></i></button><span class="qty-square-value">${qty}</span><button class="qty-square-btn" data-id="${p.id}" data-delta="1"><i class="fas fa-plus"></i></button></div>`;
+  }
+  cardHtml += `</div></div>`;
+  return cardHtml;
+}
+
+// ========== GLOBAL EVENT DELEGATION ==========
+function setupGlobalListeners() {
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('button');
+    if (btn) {
+      if (btn.classList.contains('add-button') && !btn.disabled) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id);
+        adjustQuantity(id, 1);
+        return;
+      } else if (btn.classList.contains('qty-square-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id);
+        const delta = parseInt(btn.dataset.delta);
+        adjustQuantity(id, delta);
+        return;
+      }
+    }
+    const card = e.target.closest('.product-card');
+    if (card && !e.target.closest('button')) {
+      e.preventDefault();
+      const id = parseInt(card.dataset.productId);
+      if (id) openProductDetail(id);
+    }
+  });
+}
+
+// ========== STORE CLOSED BANNER ==========
+let closedBannerShown = false;
+
+function updateStoreStatusUI() {
+  const mainElement = document.querySelector('main');
+  if (!mainElement) return;
+  // Remove existing banner if any
+  const existing = document.getElementById('storeClosedBanner');
+  if (existing) existing.remove();
+
+  const isOpen = isStoreOpenNow();
+  isStoreOpen = isOpen;
+
+  // Update order button state (if exists)
+  const orderBtn = document.getElementById('orderBtn');
+  if (orderBtn) {
+    if (!isOpen) {
+      orderBtn.classList.add('disabled');
+      orderBtn.disabled = true;
+    } else {
+      orderBtn.classList.remove('disabled');
+      orderBtn.disabled = false;
     }
   }
-  
-  if (!hasQty || !showQtyControls) {
-    return `<div class="product-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<button class="add-button" data-id="${p.id}"><i class="fas fa-plus"></i> Add</button></div></div>`;
+
+  // Show/hide sticky cart order button? We'll handle separately.
+
+  if (!isOpen) {
+    const banner = document.createElement('div');
+    banner.id = 'storeClosedBanner';
+    banner.className = 'store-closed-banner';
+    const statusMsg = getStoreStatusMessage();
+    banner.innerHTML = `
+      <span class="icon"><i class="fas fa-store-alt-slash"></i></span>
+      <span class="message"><strong>🕒 Store is currently closed</strong><br>${statusMsg}</span>
+      <span class="times">${OPENING_HOURS.map(slot => {
+        const startH = Math.floor(slot.start/60);
+        const startM = slot.start%60;
+        const endH = Math.floor(slot.end/60);
+        const endM = slot.end%60;
+        const startStr = new Date(0,0,0,startH,startM).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        const endStr = new Date(0,0,0,endH,endM).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        return `${startStr} - ${endStr}`;
+      }).join(' | ')}</span>
+    `;
+    // Insert after category header
+    const catHeader = document.querySelector('.category-header');
+    if (catHeader && catHeader.nextSibling) {
+      mainElement.insertBefore(banner, catHeader.nextSibling);
+    } else {
+      mainElement.prepend(banner);
+    }
+    closedBannerShown = true;
   } else {
-    return `<div class="product-card">${imgHtml}<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}<div class="square-qty-box"><button class="qty-square-btn" data-id="${p.id}" data-delta="-1"><i class="fas fa-minus"></i></button><span class="qty-square-value">${qty}</span><button class="qty-square-btn" data-id="${p.id}" data-delta="1"><i class="fas fa-plus"></i></button></div></div></div>`;
+    closedBannerShown = false;
   }
 }
 
-function bindProductEvents(container = document) {
-  container.querySelectorAll('.add-button:not(.disabled)').forEach(btn => {
-    const newBtn = btn.cloneNode(true);
-    btn.parentNode.replaceChild(newBtn, btn);
-    newBtn.addEventListener('click', e => adjustQuantity(parseInt(newBtn.dataset.id), 1));
-  });
-  container.querySelectorAll('.qty-square-btn').forEach(btn => {
-    const newBtn = btn.cloneNode(true);
-    btn.parentNode.replaceChild(newBtn, btn);
-    newBtn.addEventListener('click', e => adjustQuantity(parseInt(newBtn.dataset.id), parseInt(newBtn.dataset.delta)));
-  });
-}
-
-// ========== OFFERS TEASER (HOME PAGE ONLY) ==========
+// ========== OFFERS TEASER ==========
 function renderOffersTeaser() {
   const teaserSection = document.getElementById('offersTeaserSection');
   const scrollContainer = document.getElementById('offersTeaserScroll');
@@ -341,7 +656,10 @@ function renderOffersPage() {
         imageUrl: offer.imageUrl,
         tags: '',
         label: '',
-        qty: 999
+        qty: 999,
+        description: offer.description || '',
+        highlight: offer.highlight || '',
+        othr_img: offer.othr_img || ''
       };
       html += createProductCard(fakeProduct, true);
     });
@@ -350,7 +668,6 @@ function renderOffersPage() {
 
   html += `</div>`;
   productsGrid.innerHTML = html;
-  bindProductEvents(productsGrid);
 
   if (slideOffers.length > 1) {
     const slides = document.querySelectorAll('.offers-slide');
@@ -377,7 +694,7 @@ function renderOffersPage() {
   }
 }
 
-// ========== OFFER MODAL FUNCTIONS ==========
+// ========== OFFER MODAL ==========
 function showOfferDetailModal(offer) {
   currentOffer = offer;
   const modal = document.getElementById('offerDetailModal');
@@ -455,7 +772,6 @@ function renderCustomHomeLayout() {
   const teaserSection = document.getElementById('offersTeaserSection');
   if (teaserSection) teaserSection.style.display = 'none';
   
-  // ---------- ANNOUNCEMENT BANNER (auto-close after 15s) ----------
   let bannerHtml = '';
   let closeTimer = null;
   if (!localStorage.getItem('announcement_closed')) {
@@ -482,10 +798,8 @@ function renderCustomHomeLayout() {
   const slideshowHtml = `<div class="home-slideshow"><div class="slide active"><img src="${slide1Url}" alt="Fresh vegetables"></div><div class="slide"><img src="${slide2Url}" alt="Organic fruits"></div><div class="slide"><img src="${slide3Url}" alt="Leafy greens"></div><div class="slideshow-dots"></div></div>`;
   const categoryStripHtml = `<div class="category-strip"><div class="category-square" data-cat-value="vegitable-fresh"><img class="square-img" src="${getImageUrl('vegitable-fresh')}" alt="Fresh Veg"><span class="square-name">Fresh Veg</span></div><div class="category-square" data-cat-value="vegitable-fresh-leafs"><img class="square-img" src="${getImageUrl('vegitable-fresh-leafs')}" alt="Fresh Leafs"><span class="square-name">Fresh Leafs</span></div><div class="category-square" data-cat-value="fruits-fresh"><img class="square-img" src="${getImageUrl('fruits-fresh')}" alt="Fresh Fruits"><span class="square-name">Fresh Fruits</span></div><div class="category-square" data-cat-value="diary"><img class="square-img" src="${getImageUrl('diary')}" alt="Dairy & Egg"><span class="square-name">Dairy & Egg</span></div><div class="category-square" data-cat-value="meats"><img class="square-img" src="${getImageUrl('meats')}" alt="Meats"><span class="square-name">Meats</span></div><div class="category-square" data-cat-value="rice"><img class="square-img" src="${getImageUrl('rice')}" alt="Atta & Rice"><span class="square-name">Atta & Rice</span></div></div>`;
   
-  // Insert banner at the top
   productsGrid.innerHTML = bannerHtml + firstFourHtml + slideshowHtml + categoryStripHtml;
   
-  // Handle banner close (manual or auto)
   if (bannerHtml) {
     setTimeout(() => {
       const banner = document.getElementById('announcementBanner');
@@ -497,12 +811,10 @@ function renderCustomHomeLayout() {
         localStorage.setItem('announcement_closed', 'true');
       };
       
-      // Auto-close after 15 seconds
       closeTimer = setTimeout(() => {
         removeBanner();
       }, 15000);
       
-      // Manual close
       if (closeBtn) {
         closeBtn.addEventListener('click', () => {
           removeBanner();
@@ -511,11 +823,11 @@ function renderCustomHomeLayout() {
     }, 0);
   }
   
-  bindProductEvents(productsGrid);
   initSlideshow();
   attachCategorySquareEvents();
   renderHomeCarousel(nextTen);
   renderOffersTeaser();
+  updateStoreStatusUI(); // show closed banner if needed
 }
 
 function initSlideshow() {
@@ -575,7 +887,6 @@ function renderHomeCarousel(productsToShow = null) {
   let carouselHtml = '';
   items.forEach(p => { carouselHtml += createProductCard(p, true); });
   carouselContainer.innerHTML = carouselHtml;
-  bindProductEvents(carouselContainer);
 }
 
 function renderSuggestionBasedResults(selectedProduct) {
@@ -606,14 +917,12 @@ function renderSuggestionBasedResults(selectedProduct) {
     html += `<div class="related-by-tags-section" style="margin-top: 28px;"><div class="carousel-header"><h3><i class="fas fa-link"></i> Related products</h3><span class="carousel-hint"><i class="fas fa-arrow-left"></i> Swipe to explore <i class="fas fa-arrow-right"></i></span></div><div class="horizontal-scroll-wrapper" id="suggestionTagCarousel"></div></div>`;
   }
   productsGrid.innerHTML = html;
-  bindProductEvents(productsGrid);
   if (sameCategoryProducts.length > 0) {
     const catCarousel = document.getElementById('suggestionCategoryCarousel');
     if (catCarousel) {
       let carouselHtml = '';
       sameCategoryProducts.forEach(p => { carouselHtml += createProductCard(p, true); });
       catCarousel.innerHTML = carouselHtml;
-      bindProductEvents(catCarousel);
     }
   }
   if (relatedByTags.length > 0) {
@@ -622,7 +931,6 @@ function renderSuggestionBasedResults(selectedProduct) {
       let carouselHtml = '';
       relatedByTags.forEach(p => { carouselHtml += createProductCard(p, true); });
       tagCarousel.innerHTML = carouselHtml;
-      bindProductEvents(tagCarousel);
     }
   }
 }
@@ -676,14 +984,12 @@ function renderSearchResults() {
     html += `<div class="related-by-tags-section" style="margin-top: 28px;"><div class="carousel-header"><h3><i class="fas fa-link"></i> Related by tags</h3><span class="carousel-hint"><i class="fas fa-arrow-left"></i> Swipe to explore <i class="fas fa-arrow-right"></i></span></div><div class="horizontal-scroll-wrapper" id="similarTagCarousel"></div></div>`;
   }
   productsGrid.innerHTML = html;
-  bindProductEvents(productsGrid);
   if (similarByCategory.length > 0) {
     const catCarousel = document.getElementById('similarCategoryCarousel');
     if (catCarousel) {
       let carouselHtml = '';
       similarByCategory.forEach(p => { carouselHtml += createProductCard(p, true); });
       catCarousel.innerHTML = carouselHtml;
-      bindProductEvents(catCarousel);
     }
   }
   if (similarByTag.length > 0) {
@@ -692,7 +998,6 @@ function renderSearchResults() {
       let carouselHtml = '';
       similarByTag.forEach(p => { carouselHtml += createProductCard(p, true); });
       tagCarousel.innerHTML = carouselHtml;
-      bindProductEvents(tagCarousel);
     }
   }
 }
@@ -724,7 +1029,6 @@ function renderFilteredGrid() {
     productsGrid.innerHTML = `<div class="no-results" style="grid-column:1/-1; padding:40px;">✨ No products found</div>`;
   } else {
     productsGrid.innerHTML = filtered.map(p => createProductCard(p, true)).join('');
-    bindProductEvents(productsGrid);
   }
   const carouselSection = document.getElementById('homeCarouselSection');
   if (carouselSection) carouselSection.style.display = 'none';
@@ -744,6 +1048,7 @@ function renderProducts() {
   } else {
     renderFilteredGrid();
   }
+  updateStoreStatusUI(); // ensure banner is shown if closed
 }
 
 function getCategoryList() {
@@ -907,6 +1212,7 @@ function renderCart() {
     newBtn.addEventListener('click', () => {
       const id = parseInt(newBtn.dataset.id);
       delete cart[id];
+      saveCart(cart);
       updateCartCountUI();
       renderProducts();
       renderCart();
@@ -1159,8 +1465,10 @@ function createMap(initialLat = null, initialLng = null) {
 
 function attemptAutoLocation() {
   if (navigator.geolocation) {
+    showLoadingOverlay('Fetching your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        hideLoadingOverlay();
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
         const distance = getDistanceKm(ADAT_LAT, ADAT_LON, userLat, userLng);
@@ -1174,6 +1482,7 @@ function attemptAutoLocation() {
         }
       },
       (error) => {
+        hideLoadingOverlay();
         console.warn("Geolocation error:", error);
         showToast("Could not get your location. Please drag the marker manually.");
       },
@@ -1186,8 +1495,10 @@ function attemptAutoLocation() {
 
 function useCurrentLocation() {
   if (navigator.geolocation) {
+    showLoadingOverlay('Fetching your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        hideLoadingOverlay();
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
         const distance = getDistanceKm(ADAT_LAT, ADAT_LON, userLat, userLng);
@@ -1195,13 +1506,17 @@ function useCurrentLocation() {
           map.setView([userLat, userLng], 15);
           marker.setLatLng([userLat, userLng]);
           marker.fire('dragend');
+          showToast("📍 Location updated");
         } else {
           showToast("❌ Your location is outside our 5 km delivery area. Please drag the marker inside the circle.");
         }
       },
       (error) => {
+        hideLoadingOverlay();
         showToast("Unable to get your location. Please drag the marker manually.");
-      }
+        console.warn("Geolocation error:", error);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   } else {
     showToast("Geolocation is not supported by your browser.");
@@ -1238,10 +1553,6 @@ function showStep(step) {
     if (orderSummary) orderSummary.innerHTML = summaryHtml;
     const ecoLine = document.getElementById('ecoBoxChargeLine');
     if (ecoLine) ecoLine.style.display = customerData.useEcoBox ? 'block' : 'none';
-    const deliveryLine = document.getElementById('deliveryChargeLine');
-    if (deliveryLine) deliveryLine.style.display = deliveryCharge > 0 ? 'block' : 'none';
-    const deliverySpan = document.getElementById('deliveryChargeAmount');
-    if (deliverySpan) deliverySpan.textContent = `₹${deliveryCharge}`;
     const finalTotal = document.getElementById('confirmFinalTotal');
     if (finalTotal) finalTotal.innerHTML = `Total: ₹${total}`;
   }
@@ -1371,6 +1682,11 @@ function startMultiStepFlow() {
 }
 
 function openAddressFlow() {
+  if (!isStoreOpen) {
+    showToast("❌ Store is currently closed. Please order during opening hours.");
+    return;
+  }
+  isLoginMode = false;
   if (Object.keys(cart).length === 0) {
     showToast("Cart is empty");
     return;
@@ -1396,6 +1712,7 @@ function openAddressFlow() {
 function closeAddressFlow() {
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'none';
+  hideLoadingOverlay();
 }
 
 function handleBack() {
@@ -1443,6 +1760,7 @@ function sendFinalWhatsApp() {
   const msg = `🌿 *FRESH ADAT ORDER* 🌿\n━━━━━━━━━━━━━━━━━━\n🆔 Order ID: ${orderId}\n👤 Customer: ${customerData.name}\n📞 Phone: ${customerData.phone}\n📍 Address: ${fullAddress}\n🏷️ Type: ${customerData.addressType}\n🗺️ Map: ${mapLink}\n\n🛍️ *Items:*\n${itemsList}${deliveryLine}${ecoLine}💰 Subtotal: ₹${subtotal}\n💵 Total: ₹${total}\n\n✅ Delivered in reusable eco‑box\n♻️ Please return the empty box after delivery\n📝 Note: Thank you for ordering with Fresh Adat!`;
   window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   cart = {};
+  saveCart(cart);
   updateCartCountUI();
   renderProducts();
   updateStickyCartBar();
@@ -1450,254 +1768,122 @@ function sendFinalWhatsApp() {
   showToast('✅ Order sent! We will process it shortly.');
 }
 
-function initAddressFlow() {
-  addressFlowModal = document.getElementById('addressFlowModal');
-  if (!addressFlowModal) return;
-  const closeBtn = document.getElementById('closeAddressFlow');
-  const backBtn = document.getElementById('backArrowBtn');
-  const confirmLocationBtn = document.getElementById('confirmLocationBtn');
-  const nextPersonalBtn = document.getElementById('nextToPersonalBtn');
-  const nextConfirmBtn = document.getElementById('nextToConfirmBtn');
-  const sendFinalBtn = document.getElementById('sendWhatsAppFinalBtn');
-  const editBtn = document.getElementById('editAddressBtn');
-  const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
-  const useLocationBtn = document.getElementById('useMyLocationBtn');
-
-  if (closeBtn) closeBtn.addEventListener('click', closeAddressFlow);
-  if (backBtn) backBtn.addEventListener('click', handleBack);
-  if (confirmLocationBtn) {
-    confirmLocationBtn.addEventListener('click', () => {
-      if (currentLocationValid) {
-        showStep(2);
-      } else {
-        showToast('Please select a location within 5 km delivery area.');
-      }
-    });
-  }
-  if (nextPersonalBtn) {
-    nextPersonalBtn.addEventListener('click', () => {
-      const house = document.getElementById('addrHouse');
-      const area = document.getElementById('addrArea');
-      const landmark = document.getElementById('addrLandmark');
-      const selectedType = document.querySelector('input[name="addrType"]:checked');
-      const ecoCheckbox = document.getElementById('ecoBoxCheckbox');
-      if (!house || !house.value.trim()) {
-        showToast('Please enter house/flat/floor number');
-        return;
-      }
-      customerData.house = house.value.trim();
-      customerData.area = area ? area.value.trim() : '';
-      customerData.landmark = landmark ? landmark.value.trim() : '';
-      if (selectedType) customerData.addressType = selectedType.value;
-      if (ecoCheckbox) customerData.useEcoBox = ecoCheckbox.checked;
-      showStep(3);
-    });
-  }
-  if (nextConfirmBtn) {
-    nextConfirmBtn.addEventListener('click', () => {
-      const name = document.getElementById('custFullName');
-      const phone = document.getElementById('custPhoneNumber');
-      if (!name || !name.value.trim() || !phone || !phone.value.trim()) {
-        showToast('Please enter your full name and phone number');
-        return;
-      }
-      customerData.name = name.value.trim();
-      customerData.phone = phone.value.trim();
-      saveCustomerData();
-      showStep(4);
-    });
-  }
-  if (sendFinalBtn) sendFinalBtn.addEventListener('click', sendFinalWhatsApp);
-  if (editBtn) editBtn.addEventListener('click', startMultiStepFlow);
-  if (sendSummaryBtn) sendSummaryBtn.addEventListener('click', sendOrderFromSummary);
-  if (useLocationBtn) useLocationBtn.addEventListener('click', useCurrentLocation);
-
-  window.addEventListener('click', (e) => {
-    if (e.target === addressFlowModal) closeAddressFlow();
-  });
-}
-
-// ========== CATEGORIES MODAL ==========
-function openCategoriesModal() {
-  const allCats = getCategoryList();
-  categoriesGrid.innerHTML = allCats.map(cat => {
-    const key = cat.toLowerCase();
-    let imgUrl = getImageUrl(key);
-    return `<div class="category-item" data-category="${cat}"><img class="category-image" src="${imgUrl}" alt="${cat}" loading="lazy"><span class="category-name">${cat}</span></div>`;
-  }).join('');
-  pushPageState('categories');
-  categoriesModal.classList.add('open');
-  document.querySelectorAll('.category-item').forEach(item => {
-    item.addEventListener('click', () => {
-      selectedCat = item.dataset.category;
-      renderCategories();
-      renderProducts();
-      closeCategoriesModal();
-    });
-  });
-}
-function closeCategoriesModal() { categoriesModal.classList.remove('open'); }
-
 // ========== ACCOUNT MODAL ==========
-function openAccountModal() {
-  renderAccountModal();
-  const accountModal = document.getElementById('accountModal');
-  if (accountModal) accountModal.style.display = 'flex';
+function getUserDetails() {
+  try { return JSON.parse(localStorage.getItem('freshAdatUserDetails')) || null; } catch { return null; }
 }
 
-function closeAccountModalFunc() {
-  const accountModal = document.getElementById('accountModal');
-  if (accountModal) accountModal.style.display = 'none';
+function saveUserDetails(details) {
+  localStorage.setItem('freshAdatUserDetails', JSON.stringify(details));
 }
 
-function showStaticContent(title, content) {
-  const body = document.getElementById('accountModalBody');
-  if (!body) return;
-  body.innerHTML = `
-    <div class="static-content">
-      <div class="static-header">
-        <button class="back-to-account" id="backToAccountBtn"><i class="fas fa-arrow-left"></i></button>
-        <h3>${escapeHtml(title)}</h3>
-      </div>
-      <div class="static-body">
-        ${content}
-      </div>
-    </div>
-  `;
-  document.getElementById('backToAccountBtn')?.addEventListener('click', () => {
-    renderAccountModal();
-  });
+function clearUserDetails() {
+  localStorage.removeItem('freshAdatUserDetails');
 }
 
 function renderAccountModal() {
   const body = document.getElementById('accountModalBody');
   if (!body) return;
-  
+
   const saved = localStorage.getItem('freshAdat_customer');
+  let user = null;
   if (saved) {
-    try {
-      const user = JSON.parse(saved);
-      if (user.name && user.phone && user.location && user.house) {
-        const fullAddress = `${user.house}, ${user.area}${user.landmark ? ', ' + user.landmark : ''}, ${user.location.address}`;
-        body.innerHTML = `
-          <div class="user-info" style="text-align: center; padding: 20px;">
-            <div class="user-avatar"><i class="fas fa-user-circle" style="font-size: 4rem; color: var(--green);"></i></div>
-            <h2>${escapeHtml(user.name)}</h2>
-            <p><i class="fas fa-phone"></i> ${escapeHtml(user.phone)}</p>
-            <p><i class="fas fa-map-marker-alt"></i> ${escapeHtml(fullAddress)}</p>
-            <p><i class="fas fa-envelope"></i> fresh4adat@gmail.com</p>
-            <button id="editProfileBtn" class="edit-profile-btn" style="background: var(--green); color: white; border: none; border-radius: 40px; padding: 10px 24px; margin-top: 16px; cursor: pointer;"><i class="fas fa-edit"></i> Edit Profile</button>
-          </div>
-          <div class="account-menu">
-            <div class="menu-item" id="contactUsBtnLogged">
-              <i class="fas fa-headset"></i>
-              <span>Contact Us</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-            <div class="menu-item" id="downloadAppBtnLogged">
-              <i class="fas fa-download"></i>
-              <span>Download App</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-            <div class="menu-item" id="faqsBtnLogged">
-              <i class="fas fa-question-circle"></i>
-              <span>FAQs</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-            <div class="menu-item" id="termsBtnLogged">
-              <i class="fas fa-file-contract"></i>
-              <span>Terms & Conditions</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-            <div class="menu-item" id="privacyBtnLogged">
-              <i class="fas fa-shield-alt"></i>
-              <span>Privacy Policy</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-            <div class="menu-item" id="sellerInfoBtnLogged">
-              <i class="fas fa-store"></i>
-              <span>Seller Information</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-            <div class="menu-item logout-item" id="logoutBtn">
-              <i class="fas fa-sign-out-alt"></i>
-              <span>Logout</span>
-              <i class="fas fa-chevron-right"></i>
-            </div>
-          </div>
-        `;
-        
-        document.getElementById('editProfileBtn')?.addEventListener('click', () => {
-          closeAccountModalFunc();
-          startMultiStepFlow();
-        });
-        document.getElementById('contactUsBtnLogged')?.addEventListener('click', () => {
-          showStaticContent('Contact Us', `
-            <p><strong>📞 Phone:</strong> <a href="tel:+919496840336">+91 94968 40336</a></p>
-            <p><strong>📧 Email:</strong> <a href="mailto:fresh4adat@gmail.com">fresh4adat@gmail.com</a></p>
-            <p><strong>📍 Address:</strong> Adat, Thrissur, Kerala, India</p>
-            <p><strong>⏰ Business Hours:</strong> Monday - Saturday, 9:00 AM - 7:00 PM</p>
-          `);
-        });
-        document.getElementById('downloadAppBtnLogged')?.addEventListener('click', () => {
-          const installBanner = document.getElementById('installBanner');
-          if (installBanner) installBanner.style.display = 'flex';
-          else showToast('📱 Please use Chrome or Safari to install the app');
-          closeAccountModalFunc();
-        });
-        document.getElementById('faqsBtnLogged')?.addEventListener('click', () => {
-          showStaticContent('Frequently Asked Questions', `
-            <div class="faq-item"><strong>❓ How do I place an order?</strong><br>Select products, add to cart, then click "Place Order" and fill delivery details.</div>
-            <div class="faq-item"><strong>❓ What is the delivery area?</strong><br>We deliver within 5 km of Adat, Thrissur.</div>
-            <div class="faq-item"><strong>❓ Is there a minimum order value?</strong><br>No minimum order value. Free delivery above ₹200.</div>
-            <div class="faq-item"><strong>❓ What is the eco-box charge?</strong><br>We deliver in reusable eco-boxes for ₹10 per order. Please return the empty box after delivery.</div>
-            <div class="faq-item"><strong>❓ How do I track my order?</strong><br>You will receive a WhatsApp confirmation after placing the order.</div>
-            <div class="faq-item"><strong>❓ Can I modify my order after placing?</strong><br>Please contact us immediately via WhatsApp or phone.</div>
-          `);
-        });
-        document.getElementById('termsBtnLogged')?.addEventListener('click', () => {
-          showStaticContent('Terms & Conditions', `
-            <p><strong>1. Acceptance of Terms</strong><br>By using Fresh Adat, you agree to these terms.</p>
-            <p><strong>2. Delivery Policy</strong><br>We deliver within 5 km of Adat. Delivery times may vary.</p>
-            <p><strong>3. Payment</strong><br>Payments are accepted via cash on delivery, Google Pay, PhonePe, Paytm.</p>
-            <p><strong>4. Returns & Refunds</strong><br>Quality issues must be reported within 2 hours of delivery.</p>
-            <p><strong>5. Eco-Box</strong><br>Eco-boxes are reusable. Failure to return may incur additional charges.</p>
-            <p><strong>6. Privacy</strong><br>Your data is safe and never shared with third parties.</p>
-          `);
-        });
-        document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
-          showStaticContent('Privacy Policy', `
-            <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
-            <p><strong>Data Security</strong><br>Your data is stored securely and not shared with third parties.</p>
-            <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
-            <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
-          `);
-        });
-        document.getElementById('sellerInfoBtnLogged')?.addEventListener('click', () => {
-          showStaticContent('Seller Information', `
-            <p><strong>Business Name:</strong> Fresh Adat</p>
-            <p><strong>Registered Address:</strong> Adat, Thrissur, Kerala - 680551</p>
-            <p><strong>GSTIN:</strong> 32ABCDE1234F1Z5</p>
-            <p><strong>FSSAI License:</strong> 12345678901234</p>
-            <p><strong>Contact:</strong> +91 94968 40336</p>
-            <p><strong>Email:</strong> fresh4adat@gmail.com</p>
-          `);
-        });
-        document.getElementById('logoutBtn')?.addEventListener('click', () => {
-          localStorage.removeItem('freshAdat_customer');
-          customerData = {
-            name: '', phone: '', location: { lat: null, lng: null, address: '' },
-            house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false
-          };
-          renderAccountModal();
-          showToast('👋 Logged out successfully');
-        });
-        return;
-      }
-    } catch(e) {}
+    try { user = JSON.parse(saved); } catch(e) {}
   }
-  
-  // Guest view
+
+  if (user && user.name && user.phone && user.location && user.house) {
+    const fullAddress = `${user.house}, ${user.area ? user.area + ', ' : ''}${user.landmark ? user.landmark + ', ' : ''}${user.location.address || ''}`;
+    const cleanAddress = fullAddress.replace(/, ,/g, ',').replace(/,\s*,/g, ',').replace(/,\s*$/, '');
+    
+    body.innerHTML = `
+      <div class="user-info">
+        <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
+        <div class="user-name">${escapeHtml(user.name)}</div>
+        <div class="user-detail"><i class="fas fa-phone"></i> ${escapeHtml(user.phone)}</div>
+        <div class="user-address">📍 ${escapeHtml(cleanAddress)}</div>
+        <div class="user-detail"><i class="fas fa-envelope"></i> fresh4adat@gmail.com</div>
+        <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-edit"></i> Edit Profile</button>
+      </div>
+      <div class="account-menu">
+        <div class="menu-item" id="contactUsBtnLogged"><i class="fas fa-headset"></i><span>Contact Us</span><i class="fas fa-chevron-right"></i></div>
+        <div class="menu-item" id="downloadAppBtnLogged"><i class="fas fa-download"></i><span>Download App</span><i class="fas fa-chevron-right"></i></div>
+        <div class="menu-item" id="faqsBtnLogged"><i class="fas fa-question-circle"></i><span>FAQs</span><i class="fas fa-chevron-right"></i></div>
+        <div class="menu-item" id="termsBtnLogged"><i class="fas fa-file-contract"></i><span>Terms & Conditions</span><i class="fas fa-chevron-right"></i></div>
+        <div class="menu-item" id="privacyBtnLogged"><i class="fas fa-shield-alt"></i><span>Privacy Policy</span><i class="fas fa-chevron-right"></i></div>
+        <div class="menu-item" id="sellerInfoBtnLogged"><i class="fas fa-store"></i><span>Seller Information</span><i class="fas fa-chevron-right"></i></div>
+        <div class="menu-item logout-item" id="logoutBtn"><i class="fas fa-sign-out-alt"></i><span>Logout</span><i class="fas fa-chevron-right"></i></div>
+      </div>
+    `;
+
+    document.getElementById('editProfileBtn')?.addEventListener('click', () => {
+      closeAccountModalFunc();
+      openAddressFlowForLogin();
+    });
+    document.getElementById('contactUsBtnLogged')?.addEventListener('click', () => {
+      showStaticContent('Contact Us', `
+        <p><strong>📞 Phone:</strong> <a href="tel:+919496840336">+91 94968 40336</a></p>
+        <p><strong>📧 Email:</strong> <a href="mailto:fresh4adat@gmail.com">fresh4adat@gmail.com</a></p>
+        <p><strong>📍 Address:</strong> Adat, Thrissur, Kerala, India</p>
+        <p><strong>⏰ Business Hours:</strong> Monday - Saturday, 9:00 AM - 7:00 PM</p>
+      `);
+    });
+    document.getElementById('downloadAppBtnLogged')?.addEventListener('click', () => {
+      const installBanner = document.getElementById('installBanner');
+      if (installBanner) installBanner.style.display = 'flex';
+      else showToast('📱 Please use Chrome or Safari to install the app');
+      closeAccountModalFunc();
+    });
+    document.getElementById('faqsBtnLogged')?.addEventListener('click', () => {
+      showStaticContent('Frequently Asked Questions', `
+        <div class="faq-item"><strong>❓ How do I place an order?</strong><br>Select products, add to cart, then click "Place Order" and fill delivery details.</div>
+        <div class="faq-item"><strong>❓ What is the delivery area?</strong><br>We deliver within 5 km of Adat, Thrissur.</div>
+        <div class="faq-item"><strong>❓ Is there a minimum order value?</strong><br>No minimum order value. Free delivery above ₹200.</div>
+        <div class="faq-item"><strong>❓ What is the eco-box charge?</strong><br>We deliver in reusable eco-boxes for ₹10 per order. Please return the empty box after delivery.</div>
+        <div class="faq-item"><strong>❓ How do I track my order?</strong><br>You will receive a WhatsApp confirmation after placing the order.</div>
+        <div class="faq-item"><strong>❓ Can I modify my order after placing?</strong><br>Please contact us immediately via WhatsApp or phone.</div>
+      `);
+    });
+    document.getElementById('termsBtnLogged')?.addEventListener('click', () => {
+      showStaticContent('Terms & Conditions', `
+        <p><strong>1. Acceptance of Terms</strong><br>By using Fresh Adat, you agree to these terms.</p>
+        <p><strong>2. Delivery Policy</strong><br>We deliver within 5 km of Adat. Delivery times may vary.</p>
+        <p><strong>3. Payment</strong><br>Payments are accepted via cash on delivery, Google Pay, PhonePe, Paytm.</p>
+        <p><strong>4. Returns & Refunds</strong><br>Quality issues must be reported within 2 hours of delivery.</p>
+        <p><strong>5. Eco-Box</strong><br>Eco-boxes are reusable. Failure to return may incur additional charges.</p>
+        <p><strong>6. Privacy</strong><br>Your data is safe and never shared with third parties.</p>
+      `);
+    });
+    document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
+      showStaticContent('Privacy Policy', `
+        <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
+        <p><strong>Data Security</strong><br>Your data is stored securely and not shared with third parties.</p>
+        <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
+        <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
+      `);
+    });
+    document.getElementById('sellerInfoBtnLogged')?.addEventListener('click', () => {
+      showStaticContent('Seller Information', `
+        <p><strong>Business Name:</strong> Fresh Adat</p>
+        <p><strong>Registered Address:</strong> Adat, Thrissur, Kerala - 680551</p>
+        <p><strong>GSTIN:</strong> 32ABCDE1234F1Z5</p>
+        <p><strong>FSSAI License:</strong> 12345678901234</p>
+        <p><strong>Contact:</strong> +91 94968 40336</p>
+        <p><strong>Email:</strong> fresh4adat@gmail.com</p>
+      `);
+    });
+    document.getElementById('logoutBtn')?.addEventListener('click', () => {
+      localStorage.removeItem('freshAdat_customer');
+      customerData = {
+        name: '', phone: '', location: { lat: null, lng: null, address: '' },
+        house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false
+      };
+      renderAccountModal();
+      showToast('👋 Logged out successfully');
+    });
+    return;
+  }
+
+  // GUEST view
   body.innerHTML = `
     <div class="guest-section">
       <div class="guest-icon"><i class="fas fa-user-circle"></i></div>
@@ -1707,39 +1893,14 @@ function renderAccountModal() {
       <button id="accountLoginBtn" class="login-btn"><i class="fas fa-sign-in-alt"></i> Login</button>
     </div>
     <div class="account-menu">
-      <div class="menu-item" id="contactUsBtnGuest">
-        <i class="fas fa-headset"></i>
-        <span>Contact Us</span>
-        <i class="fas fa-chevron-right"></i>
-      </div>
-      <div class="menu-item" id="downloadAppBtnGuest">
-        <i class="fas fa-download"></i>
-        <span>Download App</span>
-        <i class="fas fa-chevron-right"></i>
-      </div>
-      <div class="menu-item" id="faqsBtnGuest">
-        <i class="fas fa-question-circle"></i>
-        <span>FAQs</span>
-        <i class="fas fa-chevron-right"></i>
-      </div>
-      <div class="menu-item" id="termsBtnGuest">
-        <i class="fas fa-file-contract"></i>
-        <span>Terms & Conditions</span>
-        <i class="fas fa-chevron-right"></i>
-      </div>
-      <div class="menu-item" id="privacyBtnGuest">
-        <i class="fas fa-shield-alt"></i>
-        <span>Privacy Policy</span>
-        <i class="fas fa-chevron-right"></i>
-      </div>
-      <div class="menu-item" id="sellerInfoBtnGuest">
-        <i class="fas fa-store"></i>
-        <span>Seller Information</span>
-        <i class="fas fa-chevron-right"></i>
-      </div>
+      <div class="menu-item" id="contactUsBtnGuest"><i class="fas fa-headset"></i><span>Contact Us</span><i class="fas fa-chevron-right"></i></div>
+      <div class="menu-item" id="downloadAppBtnGuest"><i class="fas fa-download"></i><span>Download App</span><i class="fas fa-chevron-right"></i></div>
+      <div class="menu-item" id="faqsBtnGuest"><i class="fas fa-question-circle"></i><span>FAQs</span><i class="fas fa-chevron-right"></i></div>
+      <div class="menu-item" id="termsBtnGuest"><i class="fas fa-file-contract"></i><span>Terms & Conditions</span><i class="fas fa-chevron-right"></i></div>
+      <div class="menu-item" id="privacyBtnGuest"><i class="fas fa-shield-alt"></i><span>Privacy Policy</span><i class="fas fa-chevron-right"></i></div>
     </div>
   `;
-  
+
   document.getElementById('accountLoginBtn')?.addEventListener('click', () => {
     closeAccountModalFunc();
     openAddressFlowForLogin();
@@ -1786,19 +1947,23 @@ function renderAccountModal() {
       <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
     `);
   });
-  document.getElementById('sellerInfoBtnGuest')?.addEventListener('click', () => {
-    showStaticContent('Seller Information', `
-      <p><strong>Business Name:</strong> Fresh Adat</p>
-      <p><strong>Registered Address:</strong> Adat, Thrissur, Kerala - 680551</p>
-      <p><strong>GSTIN:</strong> 32ABCDE1234F1Z5</p>
-      <p><strong>FSSAI License:</strong> 12345678901234</p>
-      <p><strong>Contact:</strong> +91 94968 40336</p>
-      <p><strong>Email:</strong> fresh4adat@gmail.com</p>
-    `);
-  });
+}
+
+function openAccountModal() {
+  const modal = document.getElementById('accountModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    renderAccountModal();
+  }
+}
+
+function closeAccountModalFunc() {
+  const modal = document.getElementById('accountModal');
+  if (modal) modal.style.display = 'none';
 }
 
 function openAddressFlowForLogin() {
+  isLoginMode = true;
   loadSavedCustomerData();
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'flex';
@@ -1807,7 +1972,7 @@ function openAddressFlowForLogin() {
     showSavedSummary();
     const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
     if (sendSummaryBtn) {
-      sendSummaryBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
+      sendSummaryBtn.textContent = '💾 Save Profile';
       sendSummaryBtn.onclick = () => {
         saveCustomerData();
         closeAddressFlow();
@@ -1819,7 +1984,7 @@ function openAddressFlowForLogin() {
     startMultiStepFlow();
     const finalSendBtn = document.getElementById('sendWhatsAppFinalBtn');
     if (finalSendBtn) {
-      finalSendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
+      finalSendBtn.textContent = '💾 Save Profile';
       finalSendBtn.onclick = () => {
         const house = document.getElementById('addrHouse')?.value.trim() || '';
         const area = document.getElementById('addrArea')?.value.trim() || '';
@@ -1850,11 +2015,50 @@ function openAddressFlowForLogin() {
   }
 }
 
+function showStaticContent(title, content) {
+  const body = document.getElementById('accountModalBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="static-content">
+      <div class="static-header">
+        <button class="back-to-account" id="backToAccountBtn"><i class="fas fa-arrow-left"></i></button>
+        <h3>${escapeHtml(title)}</h3>
+      </div>
+      <div class="static-body">
+        ${content}
+      </div>
+    </div>
+  `;
+  document.getElementById('backToAccountBtn')?.addEventListener('click', () => {
+    renderAccountModal();
+  });
+}
+
+// ========== CATEGORIES MODAL ==========
+function openCategoriesModal() {
+  const allCats = getCategoryList();
+  categoriesGrid.innerHTML = allCats.map(cat => {
+    const key = cat.toLowerCase();
+    let imgUrl = getImageUrl(key);
+    return `<div class="category-item" data-category="${cat}"><img class="category-image" src="${imgUrl}" alt="${cat}" loading="lazy"><span class="category-name">${cat}</span></div>`;
+  }).join('');
+  pushPageState('categories');
+  categoriesModal.classList.add('open');
+  document.querySelectorAll('.category-item').forEach(item => {
+    item.addEventListener('click', () => {
+      selectedCat = item.dataset.category;
+      renderCategories();
+      renderProducts();
+      closeCategoriesModal();
+    });
+  });
+}
+function closeCategoriesModal() { categoriesModal.classList.remove('open'); }
+
 // ========== LOAD DATA (WITH CONFIG, ALL PRODUCT SHEETS, OFFERS) ==========
 function loadData() {
   const baseUrl = 'https://opensheet.elk.sh/1FEpSYZlTrlp0BYPEcVCYISC0kgXpt_3Fcw5XAcjLOvs';
   
-  // First fetch config from "Config" sheet
   fetch(`${baseUrl}/Config`)
     .then(res => res.json())
     .then(configRows => {
@@ -1888,6 +2092,10 @@ function loadData() {
             case 'delivery_charge':
               DELIVERY_CHARGE = parseFloat(val);
               break;
+            case 'opening_hours':
+              // expected value like "6-8,17-20" or "6-8am,5-8pm"
+              OPENING_HOURS = parseOpeningHours(val);
+              break;
           }
         });
         console.log('✅ Config loaded from sheet');
@@ -1896,11 +2104,12 @@ function loadData() {
     .catch(err => console.warn('⚠️ Config sheet not found, using defaults', err))
     .finally(() => {
       loadProductsAndOffers(baseUrl);
+      // After products loaded, update store status
+      updateStoreStatusUI();
     });
 }
 
 function loadProductsAndOffers(baseUrl) {
-  // All product sheets mapping
   const sheetMapping = [
     { sheet: 'Sheet1', category: 'vegitable-fresh', isOrganic: false },
     { sheet: 'Sheet10', category: 'vegitable-fresh-leafs', isOrganic: false },
@@ -1910,7 +2119,7 @@ function loadProductsAndOffers(baseUrl) {
     { sheet: 'Sheet14', category: 'rice', isOrganic: false },
     { sheet: 'Sheet15', category: 'oils', isOrganic: false },
     { sheet: 'Sheet16', category: 'powders', isOrganic: false },
-    { sheet: 'Sheet2', category: null, isOrganic: true },       // category from sheet column
+    { sheet: 'Sheet2', category: null, isOrganic: true },
     { sheet: 'Sheet4', category: 'cut-vegetable', isOrganic: false }
   ];
   
@@ -1930,7 +2139,6 @@ function loadProductsAndOffers(baseUrl) {
     const sheet5Data = results[sheetMapping.length];
     const sheet6Data = results[sheetMapping.length + 1];
     
-    // Image mapping
     if (sheet5Data && sheet5Data.length) {
       sheet5Data.forEach(row => {
         let nameKey = null, url = null;
@@ -1979,7 +2187,10 @@ function loadProductsAndOffers(baseUrl) {
           isOrganic: isOrganic,
           tags: tags.toLowerCase(),
           label: item.Label || '',
-          qty: productQty
+          qty: productQty,
+          description: item.Description || item.description || '',
+          highlight: item.Highlight || item.highlight || '',
+          othr_img: item.othr_img || item.OtherImages || ''
         };
       });
     };
@@ -1996,7 +2207,6 @@ function loadProductsAndOffers(baseUrl) {
     
     products = allProducts;
     
-    // Offers from Sheet6
     if (sheet6Data && sheet6Data.length) {
       offers = sheet6Data.map((row, idx) => {
         const isSlide = row.is_slide && row.is_slide.toString().toLowerCase() === 'true';
@@ -2011,7 +2221,10 @@ function loadProductsAndOffers(baseUrl) {
           productId: Number(row.product_id) || null,
           isSlide: isSlide,
           slideImageUrl: isSlide ? (row.slide_image_url || '') : '',
-          imageUrl: row.image_url || getImageUrl(row.offer_name)
+          imageUrl: row.image_url || getImageUrl(row.offer_name),
+          description: row.description || '',
+          highlight: row.highlight || '',
+          othr_img: row.othr_img || ''
         };
       });
     } else {
@@ -2024,12 +2237,12 @@ function loadProductsAndOffers(baseUrl) {
   }).catch(err => {
     console.error("Sheet fetch error, using fallback data:", err);
     products = [
-      { id:1, name:'Fresh Tomato', price:40, discountPrice:35, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes1', offer:true, isOrganic:false, tags:'tomato', label:'', qty:10 },
-      { id:2, name:'Onion', price:40, discountPrice:0, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes2', offer:false, isOrganic:false, tags:'onion', label:'', qty:0 },
-      { id:3, name:'Lady Finger', price:70, discountPrice:60, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:true, isOrganic:false, tags:'okra', label:'buy 1 get 1', qty:5 },
-      { id:4, name:'Carrot', price:45, discountPrice:0, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:false, isOrganic:false, tags:'carrot', label:'', qty:3 },
-      { id:5, name:'Broccoli', price:80, discountPrice:70, unit:'piece', category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:true, tags:'broccoli', label:'', qty:2 },
-      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'bunch', category:'vegitable-fresh-leafs', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8 }
+      { id:1, name:'Fresh Tomato', price:40, discountPrice:35, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes1', offer:true, isOrganic:false, tags:'tomato', label:'', qty:10, description:'Juicy red tomatoes, perfect for salads and cooking.', highlight:'Rich in Vitamin C', othr_img:'' },
+      { id:2, name:'Onion', price:40, discountPrice:0, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes2', offer:false, isOrganic:false, tags:'onion', label:'', qty:0, description:'Fresh onions, essential for every kitchen.', highlight:'', othr_img:'' },
+      { id:3, name:'Lady Finger', price:70, discountPrice:60, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:true, isOrganic:false, tags:'okra', label:'buy 1 get 1', qty:5, description:'Tender lady fingers, great for curries.', highlight:'High in fiber', othr_img:'' },
+      { id:4, name:'Carrot', price:45, discountPrice:0, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:false, isOrganic:false, tags:'carrot', label:'', qty:3, description:'Crunchy carrots, rich in vitamins.', highlight:'Good for eyesight', othr_img:'' },
+      { id:5, name:'Broccoli', price:80, discountPrice:70, unit:'piece', category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:true, tags:'broccoli', label:'', qty:2, description:'Fresh organic broccoli, high in fiber.', highlight:'Superfood', othr_img:'' },
+      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'bunch', category:'vegitable-fresh-leafs', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8, description:'Nutrient-rich spinach leaves.', highlight:'Iron-rich', othr_img:'' }
     ];
     offers = [];
     renderCategories();
@@ -2067,6 +2280,109 @@ window.addEventListener('popstate', function(event) {
   resetToHome();
   history.pushState({ home: true }, '', location.href);
 });
+
+// ========== ADDRESS FLOW INIT ==========
+function initAddressFlow() {
+  addressFlowModal = document.getElementById('addressFlowModal');
+  if (!addressFlowModal) return;
+
+  document.getElementById('closeAddressFlow').addEventListener('click', closeAddressFlow);
+  document.getElementById('backArrowBtn').addEventListener('click', handleBack);
+
+  document.getElementById('confirmLocationBtn').addEventListener('click', () => {
+    if (currentLocationValid) {
+      showStep(2);
+    } else {
+      showToast('Please select a location within 5 km delivery area.');
+    }
+  });
+
+  document.getElementById('nextToPersonalBtn').addEventListener('click', () => {
+    const house = document.getElementById('addrHouse');
+    if (!house || !house.value.trim()) {
+      showToast('Please enter house/flat/floor number');
+      return;
+    }
+    customerData.house = house.value.trim();
+    customerData.area = document.getElementById('addrArea').value.trim();
+    customerData.landmark = document.getElementById('addrLandmark').value.trim();
+    const selectedType = document.querySelector('input[name="addrType"]:checked');
+    if (selectedType) customerData.addressType = selectedType.value;
+    customerData.useEcoBox = document.getElementById('ecoBoxCheckbox').checked;
+    showStep(3);
+  });
+
+  document.getElementById('nextToConfirmBtn').addEventListener('click', () => {
+    const name = document.getElementById('custFullName');
+    const phone = document.getElementById('custPhoneNumber');
+    if (!name || !name.value.trim() || !phone || !phone.value.trim()) {
+      showToast('Please enter your full name and phone number');
+      return;
+    }
+    customerData.name = name.value.trim();
+    customerData.phone = phone.value.trim();
+    saveCustomerData();
+    showStep(4);
+  });
+
+  const finalSendBtn = document.getElementById('sendWhatsAppFinalBtn');
+  if (finalSendBtn) {
+    finalSendBtn.addEventListener('click', function() {
+      if (isLoginMode) {
+        // Save profile mode
+        const house = document.getElementById('addrHouse')?.value.trim() || '';
+        const area = document.getElementById('addrArea')?.value.trim() || '';
+        const landmark = document.getElementById('addrLandmark')?.value.trim() || '';
+        const name = document.getElementById('custFullName')?.value.trim() || '';
+        const phone = document.getElementById('custPhoneNumber')?.value.trim() || '';
+        const selectedType = document.querySelector('input[name="addrType"]:checked')?.value || 'Home';
+        const useEco = document.getElementById('ecoBoxCheckbox')?.checked || false;
+        
+        customerData.house = house;
+        customerData.area = area;
+        customerData.landmark = landmark;
+        customerData.name = name;
+        customerData.phone = phone;
+        customerData.addressType = selectedType;
+        customerData.useEcoBox = useEco;
+        if (!customerData.location.lat) {
+          showToast("Please set your delivery location on the map first");
+          showStep(1);
+          return;
+        }
+        saveCustomerData();
+        closeAddressFlow();
+        renderAccountModal();
+        showToast('✅ Profile saved');
+      } else {
+        sendFinalWhatsApp();
+      }
+    });
+  }
+
+  const editBtn = document.getElementById('editAddressBtn');
+  if (editBtn) editBtn.addEventListener('click', startMultiStepFlow);
+
+  const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
+  if (sendSummaryBtn) {
+    sendSummaryBtn.addEventListener('click', function() {
+      if (isLoginMode) {
+        saveCustomerData();
+        closeAddressFlow();
+        renderAccountModal();
+        showToast('✅ Profile saved');
+      } else {
+        sendOrderFromSummary();
+      }
+    });
+  }
+
+  document.getElementById('useMyLocationBtn').addEventListener('click', useCurrentLocation);
+
+  addressFlowModal.addEventListener('click', (e) => {
+    if (e.target === addressFlowModal) closeAddressFlow();
+  });
+}
 
 // ========== DOMContentLoaded ==========
 document.addEventListener('DOMContentLoaded', () => {
@@ -2137,6 +2453,26 @@ document.addEventListener('DOMContentLoaded', () => {
     visionModalElem.addEventListener('click', (e) => { if (e.target === visionModalElem) visionModalElem.classList.remove('open'); });
   }
 
+  // Product detail modal elements
+  productDetailModal = document.getElementById('productDetailModal');
+  slideshowImages = document.getElementById('slideshowImages');
+  slideshowDots = document.getElementById('slideshowDots');
+  detailName = document.getElementById('detailName');
+  detailUnit = document.getElementById('detailUnit');
+  detailPrice = document.getElementById('detailPrice');
+  detailHighlight = document.getElementById('detailHighlight');
+  detailDescription = document.getElementById('detailDescription');
+  detailAddBtn = document.getElementById('detailAddBtn');
+
+  document.getElementById('closeProductDetail').addEventListener('click', closeProductDetail);
+  productDetailModal.addEventListener('click', (e) => {
+    if (e.target === productDetailModal || e.target.classList.contains('product-detail-overlay')) {
+      closeProductDetail();
+    }
+  });
+  detailAddBtn.addEventListener('click', addProductFromDetail);
+
+  setupGlobalListeners();
   initSearchListeners();
   initAddressFlow();
   loadData();
@@ -2148,7 +2484,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addOfferBtn) addOfferBtn.addEventListener('click', addOfferToCart);
   if (offerModal) offerModal.addEventListener('click', (e) => { if (e.target === offerModal) closeOfferModal(); });
 
-  // Bottom navigation bar
+  // Bottom navigation
   const bottomNavBar = document.getElementById('bottomNavBar');
   let lastScrollTop = 0;
   let scrollTimeout;
@@ -2240,4 +2576,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (installBanner) installBanner.style.display = 'none';
     deferredPrompt = null;
   });
+
+  const savedCart = getCart();
+  cart = savedCart;
+  updateCartCountUI();
+  updateStickyCartBar();
 });
