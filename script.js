@@ -7,7 +7,7 @@ let FREE_DELIVERY_THRESHOLD = 200;
 let MAX_QTY_PER_PRODUCT = 4;
 let ECO_BOX_CHARGE = 10;
 let DELIVERY_CHARGE = 30;
-let OPENING_HOURS = []; // array of { start: minutes, end: minutes }
+let OPENING_HOURS = [];
 
 const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
@@ -19,7 +19,7 @@ let selectedCat = 'All';
 let searchTerm = '';
 let selectedSuggestionProduct = null;
 let isLoginMode = false;
-let isStoreOpen = true; // will be set after config load
+let isStoreOpen = true;
 
 let productsGrid, catRow, cartCountSpan, cartOverlay, cartPanel, cartItems, cartFooter, footerItems, footerTotal;
 let toastEl;
@@ -42,9 +42,13 @@ let offerTimerInterval = null;
 let homeTimerInterval = null;
 
 // Product detail modal
-let productDetailModal, slideshowImages, slideshowDots, detailName, detailUnit, detailPrice, detailHighlight, detailDescription, detailAddBtn;
+let productDetailModal, slideshowImages, slideshowDots, detailName, detailUnitDisplay, detailUnitWrapper, detailUnitSelector, unitOptions, detailPrice, detailHighlights, highlightsList, detailDescription, detailAddBtn, detailSelectedPrice;
 let slideshowIndex = 0;
 let slideshowImagesArray = [];
+let currentProductUnits = [];
+let currentProductPrices = [];
+let currentProductDiscountPrices = [];
+let selectedUnitIndex = 0;
 
 const FALLBACK_IMAGES = {
   slide1: 'https://via.placeholder.com/800x400?text=Slide+1',
@@ -70,22 +74,22 @@ function parseOpeningHours(str) {
   const intervals = str.split(',').map(s => s.trim());
   const result = [];
   for (let interval of intervals) {
-    // expected format: "6-8" or "6-8am" or "17-20"
     let parts = interval.split('-');
     if (parts.length !== 2) continue;
     let start = parseTime(parts[0]);
     let end = parseTime(parts[1]);
-    if (start !== null && end !== null) {
+    if (start !== null && end !== null && start < end) {
       result.push({ start, end });
     }
   }
+  result.sort((a, b) => a.start - b.start);
   return result;
 }
 
 function parseTime(str) {
   str = str.trim().toLowerCase();
   let hours = 0, minutes = 0;
-  let ampm = 1; // 1 for am, 2 for pm
+  let ampm = 1;
   if (str.includes('am')) {
     ampm = 1;
     str = str.replace('am', '').trim();
@@ -93,7 +97,6 @@ function parseTime(str) {
     ampm = 2;
     str = str.replace('pm', '').trim();
   }
-  // if no am/pm, assume 24-hour if number >= 12 else 12-hour? we'll treat as 24-hour if no am/pm
   let parts = str.split(':');
   if (parts.length === 1) {
     hours = parseInt(parts[0]);
@@ -111,44 +114,55 @@ function parseTime(str) {
 }
 
 function isStoreOpenNow() {
-  if (!OPENING_HOURS || OPENING_HOURS.length === 0) return true; // if not set, assume open
+  if (!OPENING_HOURS || OPENING_HOURS.length === 0) return true;
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   for (let slot of OPENING_HOURS) {
-    if (currentMinutes >= slot.start && currentMinutes < slot.end) {
-      return true;
-    }
+    if (currentMinutes >= slot.start && currentMinutes < slot.end) return true;
   }
   return false;
 }
 
-function getStoreStatusMessage() {
-  if (!OPENING_HOURS || OPENING_HOURS.length === 0) return '';
+function getNextOpenAndCloseTimes() {
+  if (!OPENING_HOURS || OPENING_HOURS.length === 0) return null;
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  // find next opening time
-  let nextOpen = null;
-  let nextOpenDiff = Infinity;
+  let nextOpen = null, nextClose = null, found = false;
   for (let slot of OPENING_HOURS) {
-    if (currentMinutes < slot.start) {
-      let diff = slot.start - currentMinutes;
-      if (diff < nextOpenDiff) {
-        nextOpenDiff = diff;
-        nextOpen = slot.start;
-      }
+    if (currentMinutes < slot.start && !found) {
+      nextOpen = slot.start;
+      nextClose = slot.end;
+      found = true;
+      break;
     }
   }
-  if (nextOpen === null) {
-    // if after all slots, next is first slot next day
+  if (!found && OPENING_HOURS.length > 0) {
     const firstSlot = OPENING_HOURS[0];
     nextOpen = firstSlot.start + 24 * 60;
+    nextClose = firstSlot.end + 24 * 60;
   }
-  const nextOpenDate = new Date();
-  nextOpenDate.setHours(0, 0, 0, 0);
-  nextOpenDate.setMinutes(nextOpen % (24*60));
-  nextOpenDate.setHours(Math.floor(nextOpen / 60));
-  const openTimeStr = nextOpenDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return `Store is currently closed. Opens at ${openTimeStr}. Please check back later.`;
+  return { nextOpen, nextClose };
+}
+
+function formatMinutesToTime(minutes) {
+  const hours = Math.floor(minutes / 60) % 24;
+  const mins = minutes % 60;
+  const date = new Date(0, 0, 0, hours, mins);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function getNextOpenTimeStr() {
+  const times = getNextOpenAndCloseTimes();
+  if (!times) return 'Check back later';
+  return formatMinutesToTime(times.nextOpen);
+}
+
+function getStoreStatusMessage() {
+  const times = getNextOpenAndCloseTimes();
+  if (!times) return '';
+  const openTimeStr = formatMinutesToTime(times.nextOpen);
+  const closeTimeStr = formatMinutesToTime(times.nextClose);
+  return `Opens at <span class="time">${openTimeStr}</span> · Closes at <span class="time">${closeTimeStr}</span>`;
 }
 
 // ========== LOADING OVERLAY ==========
@@ -193,7 +207,7 @@ function showToast(msg) {
 }
 
 function updateCartCountUI() {
-  const total = Object.values(cart).reduce((a, b) => a + b, 0);
+  const total = Object.values(cart).reduce((a, b) => a + (b.qty || 0), 0);
   if (cartCountSpan) cartCountSpan.textContent = total;
 }
 
@@ -205,23 +219,69 @@ function saveCart(c) {
   localStorage.setItem('freshAdatCart', JSON.stringify(c));
 }
 
-function adjustQuantity(productId, delta) {
+// Helper: get units array from product
+function getProductUnits(product) {
+  if (!product || !product.units) return [];
+  return product.units.length > 0 ? product.units : [product.unit || 'unit'];
+}
+
+// Helper: get price for a given unit index
+function getProductPrice(product, unitIndex) {
+  if (!product) return 0;
+  if (product.prices && product.prices.length > unitIndex && product.prices[unitIndex] !== undefined) {
+    return product.prices[unitIndex];
+  }
+  return product.price || 0;
+}
+
+// Helper: get discount price for a given unit index
+function getProductDiscountPrice(product, unitIndex) {
+  if (!product) return 0;
+  if (product.discountPrices && product.discountPrices.length > unitIndex && product.discountPrices[unitIndex] !== undefined) {
+    return product.discountPrices[unitIndex];
+  }
+  return product.discountPrice || 0;
+}
+
+// Helper: get effective price (discount if available) for a unit
+function getEffectivePrice(product, unitIndex) {
+  const discount = getProductDiscountPrice(product, unitIndex);
+  if (discount > 0 && discount < getProductPrice(product, unitIndex)) {
+    return discount;
+  }
+  return getProductPrice(product, unitIndex);
+}
+
+function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex) {
   const product = products.find(p => p.id == productId);
   if (!product) return;
   if (product.qty === 0) {
     showToast(`${product.name} is out of stock`);
     return;
   }
-  const currentQty = cart[productId] || 0;
+
+  const units = getProductUnits(product);
+  const unitIndex = (selectedUnitIndex !== undefined && selectedUnitIndex < units.length) ? selectedUnitIndex : 0;
+  const unit = selectedUnit || units[unitIndex] || product.unit || 'unit';
+  const price = getEffectivePrice(product, unitIndex);
+
+  const cartKey = `${productId}_${unit}`;
+  if (!cart[cartKey]) {
+    cart[cartKey] = { qty: 0, unit: unit, price: price };
+  }
+
+  const currentQty = cart[cartKey].qty || 0;
   const newQty = currentQty + delta;
   if (newQty <= 0) {
-    delete cart[productId];
+    delete cart[cartKey];
   } else if (newQty > MAX_QTY_PER_PRODUCT) {
     alert(`You can't order more than ${MAX_QTY_PER_PRODUCT} quantities of a single product in one order.`);
     return;
   } else {
-    cart[productId] = newQty;
+    cart[cartKey].qty = newQty;
+    cart[cartKey].price = price;
   }
+
   saveCart(cart);
   updateCartCountUI();
   renderProducts();
@@ -286,33 +346,83 @@ function openProductDetail(productId) {
   const modal = document.getElementById('productDetailModal');
   if (!modal) return;
 
+  // Basic info
   detailName.textContent = product.name;
-  detailUnit.textContent = product.unit;
-  detailUnit.className = 'product-detail-unit highlight-unit';
+  const units = getProductUnits(product);
+  const prices = product.prices || [];
+  const discountPrices = product.discountPrices || [];
+  currentProductUnits = units;
+  currentProductPrices = prices;
+  currentProductDiscountPrices = discountPrices;
+  selectedUnitIndex = 0;
 
-  let priceHtml = '';
-  if (product.discountPrice && product.discountPrice > 0 && product.discountPrice < product.price) {
-    priceHtml = `<span class="original-price">₹${product.price}</span> <span class="discount-price">₹${product.discountPrice}</span>`;
+  // Unit display
+  detailUnitDisplay.textContent = units[0] || product.unit || 'unit';
+  detailUnitDisplay.className = 'product-detail-unit highlight-unit';
+
+  // Unit selector
+  if (units.length > 1) {
+    detailUnitSelector.style.display = 'block';
+    unitOptions.innerHTML = units.map((u, idx) => {
+      return `<button class="unit-option ${idx === 0 ? 'active' : ''}" data-index="${idx}">
+        ${escapeHtml(u)}
+      </button>`;
+    }).join('');
+    unitOptions.querySelectorAll('.unit-option').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const idx = parseInt(this.dataset.index);
+        selectedUnitIndex = idx;
+        detailUnitDisplay.textContent = units[idx];
+        unitOptions.querySelectorAll('.unit-option').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        updateDetailPriceAndSelection(product, idx);
+      });
+    });
+    updateDetailPriceAndSelection(product, 0);
   } else {
-    priceHtml = `<span class="single-price">₹${product.price}</span>`;
+    detailUnitSelector.style.display = 'none';
+    // Show price in the main price area
+    const price = getEffectivePrice(product, 0);
+    const originalPrice = getProductPrice(product, 0);
+    let priceHtml = '';
+    if (originalPrice > price) {
+      priceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
+    } else {
+      priceHtml = `<span class="single-price">₹${price}</span>`;
+    }
+    detailPrice.innerHTML = priceHtml;
   }
-  detailPrice.innerHTML = priceHtml;
 
-  if (product.highlight) {
-    detailHighlight.textContent = product.highlight;
-    detailHighlight.style.display = 'block';
+  // Highlights
+  const highlightsContainer = detailHighlights;
+  const highlightsListEl = highlightsList;
+  if (product.highlight && typeof product.highlight === 'string') {
+    const items = product.highlight.split(',').map(item => item.trim()).filter(item => item);
+    if (items.length > 0) {
+      highlightsContainer.style.display = 'block';
+      highlightsListEl.innerHTML = items.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+    } else {
+      highlightsContainer.style.display = 'none';
+    }
   } else {
-    detailHighlight.style.display = 'none';
+    highlightsContainer.style.display = 'none';
   }
 
+  // Description
   detailDescription.textContent = product.description || 'Fresh and high quality produce.';
 
+  // Images
   const mainImg = getProductImageUrl(product);
-  let otherImages = [];
+  let extraImages = [];
   if (product.othr_img && typeof product.othr_img === 'string') {
-    otherImages = product.othr_img.split(',').map(url => url.trim()).filter(url => url.startsWith('http'));
+    const parts = product.othr_img.split(',').map(u => u.trim());
+    extraImages.push(...parts.filter(u => u.startsWith('http')));
   }
-  const allImages = [mainImg, ...otherImages.slice(0, 2)];
+  if (extraImages.length === 0) {
+    if (product.Image2 && product.Image2.startsWith('http')) extraImages.push(product.Image2);
+    if (product.Image3 && product.Image3.startsWith('http')) extraImages.push(product.Image3);
+  }
+  const allImages = [mainImg, ...extraImages.slice(0, 2)];
   slideshowImagesArray = [...new Set(allImages)];
   if (slideshowImagesArray.length === 0) {
     slideshowImagesArray = [getImageUrl('organic')];
@@ -322,9 +432,30 @@ function openProductDetail(productId) {
   renderSlideshow();
 
   detailAddBtn.dataset.productId = product.id;
-
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+}
+
+function updateDetailPriceAndSelection(product, unitIndex) {
+  const price = getEffectivePrice(product, unitIndex);
+  const originalPrice = getProductPrice(product, unitIndex);
+  let priceHtml = '';
+  if (originalPrice > price) {
+    priceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
+  } else {
+    priceHtml = `<span class="single-price">₹${price}</span>`;
+  }
+  // Update the main price display (top)
+  detailPrice.innerHTML = priceHtml;
+  
+  // Update the selected unit price display below the selector
+  let selectedPriceHtml = '';
+  if (originalPrice > price) {
+    selectedPriceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
+  } else {
+    selectedPriceHtml = `<span class="single-price">₹${price}</span>`;
+  }
+  detailSelectedPrice.innerHTML = selectedPriceHtml;
 }
 
 function renderSlideshow() {
@@ -332,32 +463,44 @@ function renderSlideshow() {
   const dotsContainer = slideshowDots;
   if (!container || !dotsContainer) return;
 
-  container.innerHTML = slideshowImagesArray.map((img, idx) => `
-    <div class="slide-image ${idx === 0 ? 'active' : ''}">
-      <img src="${img}" alt="Product image ${idx+1}" loading="lazy">
-    </div>
-  `).join('');
+  container.innerHTML = '';
+  dotsContainer.innerHTML = '';
 
-  dotsContainer.innerHTML = slideshowImagesArray.map((_, idx) => `
-    <span class="dot ${idx === 0 ? 'active' : ''}" data-index="${idx}"></span>
-  `).join('');
-
-  dotsContainer.querySelectorAll('.dot').forEach(dot => {
-    dot.addEventListener('click', () => {
-      const idx = parseInt(dot.dataset.index);
-      goToSlide(idx);
-    });
+  slideshowImagesArray.forEach((img, idx) => {
+    const div = document.createElement('div');
+    div.className = `slide-image ${idx === 0 ? 'active' : ''}`;
+    div.innerHTML = `<img src="${img}" alt="Product image ${idx+1}" loading="lazy">`;
+    container.appendChild(div);
   });
 
-  document.getElementById('slideshowPrev').onclick = () => {
-    goToSlide(slideshowIndex - 1 < 0 ? slideshowImagesArray.length - 1 : slideshowIndex - 1);
-  };
-  document.getElementById('slideshowNext').onclick = () => {
-    goToSlide((slideshowIndex + 1) % slideshowImagesArray.length);
-  };
+  const prevBtn = document.getElementById('slideshowPrev');
+  const nextBtn = document.getElementById('slideshowNext');
 
-  if (window._slideshowInterval) clearInterval(window._slideshowInterval);
-  if (slideshowImagesArray.length > 1) {
+  if (slideshowImagesArray.length <= 1) {
+    prevBtn.style.display = 'none';
+    nextBtn.style.display = 'none';
+    dotsContainer.style.display = 'none';
+  } else {
+    prevBtn.style.display = 'flex';
+    nextBtn.style.display = 'flex';
+    dotsContainer.style.display = 'flex';
+
+    slideshowImagesArray.forEach((_, idx) => {
+      const dot = document.createElement('span');
+      dot.className = `dot ${idx === 0 ? 'active' : ''}`;
+      dot.dataset.index = idx;
+      dot.addEventListener('click', () => goToSlide(idx));
+      dotsContainer.appendChild(dot);
+    });
+
+    prevBtn.onclick = () => {
+      goToSlide(slideshowIndex - 1 < 0 ? slideshowImagesArray.length - 1 : slideshowIndex - 1);
+    };
+    nextBtn.onclick = () => {
+      goToSlide((slideshowIndex + 1) % slideshowImagesArray.length);
+    };
+
+    if (window._slideshowInterval) clearInterval(window._slideshowInterval);
     window._slideshowInterval = setInterval(() => {
       goToSlide((slideshowIndex + 1) % slideshowImagesArray.length);
     }, 4000);
@@ -391,18 +534,30 @@ function closeProductDetail() {
 function addProductFromDetail() {
   const productId = parseInt(detailAddBtn.dataset.productId);
   if (productId) {
-    adjustQuantity(productId, 1);
-    closeProductDetail();
+    const product = products.find(p => p.id == productId);
+    if (product) {
+      const units = getProductUnits(product);
+      const idx = selectedUnitIndex;
+      const unit = units[idx] || units[0] || product.unit || 'unit';
+      adjustQuantity(productId, 1, unit, idx);
+    }
   }
 }
 
 // ========== PRODUCT CARD CREATION ==========
 function createProductCard(p, showQtyControls = true) {
-  const qty = cart[p.id] || 0;
+  const units = getProductUnits(p);
+  const defaultUnit = units[0] || p.unit || 'unit';
+  const defaultPrice = getEffectivePrice(p, 0);
+  const defaultOriginalPrice = getProductPrice(p, 0);
+  const cartKey = `${p.id}_${defaultUnit}`;
+  const cartItem = cart[cartKey];
+  const qty = cartItem ? cartItem.qty : 0;
   const hasQty = qty > 0;
   const isOutOfStock = (p.qty === 0);
   const imageUrl = getProductImageUrl(p);
-  
+  const hasMultipleUnits = units.length > 1;
+
   const imgHtml = `<div class="product-img">
     <img src="${imageUrl}" alt="${p.name}" loading="lazy">
     ${p.isOrganic ? '<span class="organic-label">🌿 Organic</span>' : ''}
@@ -410,28 +565,28 @@ function createProductCard(p, showQtyControls = true) {
     ${p.label ? `<div class="product-label-badge">${escapeHtml(p.label)}</div>` : ''}
     ${isOutOfStock ? '<div class="out-of-stock-overlay">Out of Stock</div>' : ''}
   </div>`;
-  
+
   let priceHtml = '';
-  if (p.discountPrice && p.discountPrice > 0 && p.discountPrice < p.price) {
-    priceHtml = `<div class="price-wrapper"><span class="original-price">₹${p.price}</span><span class="discount-price">₹${p.discountPrice}</span></div>`;
+  if (defaultOriginalPrice > defaultPrice) {
+    priceHtml = `<div class="price-wrapper"><span class="original-price">₹${defaultOriginalPrice}</span><span class="discount-price">₹${defaultPrice}</span></div>`;
   } else {
-    priceHtml = `<div class="single-price">₹${p.price}</div>`;
+    priceHtml = `<div class="single-price">₹${defaultPrice}</div>`;
   }
-  
+
   let cardHtml = `<div class="product-card" data-product-id="${p.id}" data-name="${escapeHtml(p.name)}">`;
   cardHtml += imgHtml;
-  cardHtml += `<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${p.unit}</div>${priceHtml}`;
-  
+  cardHtml += `<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${escapeHtml(defaultUnit)}${hasMultipleUnits ? ' <span class="unit-multiple-indicator">▼ ' + units.length + ' sizes</span>' : ''}</div>${priceHtml}`;
+
   if (isOutOfStock) {
     if (!hasQty || !showQtyControls) {
-      cardHtml += `<button class="add-button disabled" disabled data-id="${p.id}"><i class="fas fa-plus"></i> Add</button>`;
+      cardHtml += `<button class="add-button disabled" disabled data-id="${p.id}" data-unit="${defaultUnit}"><i class="fas fa-plus"></i> Add</button>`;
     } else {
       cardHtml += `<div class="square-qty-box"><span class="out-of-stock-text">Out of Stock</span></div>`;
     }
   } else if (!hasQty || !showQtyControls) {
-    cardHtml += `<button class="add-button" data-id="${p.id}"><i class="fas fa-plus"></i> Add</button>`;
+    cardHtml += `<button class="add-button" data-id="${p.id}" data-unit="${defaultUnit}"><i class="fas fa-plus"></i> Add</button>`;
   } else {
-    cardHtml += `<div class="square-qty-box"><button class="qty-square-btn" data-id="${p.id}" data-delta="-1"><i class="fas fa-minus"></i></button><span class="qty-square-value">${qty}</span><button class="qty-square-btn" data-id="${p.id}" data-delta="1"><i class="fas fa-plus"></i></button></div>`;
+    cardHtml += `<div class="square-qty-box"><button class="qty-square-btn" data-id="${p.id}" data-unit="${defaultUnit}" data-delta="-1"><i class="fas fa-minus"></i></button><span class="qty-square-value">${qty}</span><button class="qty-square-btn" data-id="${p.id}" data-unit="${defaultUnit}" data-delta="1"><i class="fas fa-plus"></i></button></div>`;
   }
   cardHtml += `</div></div>`;
   return cardHtml;
@@ -446,14 +601,30 @@ function setupGlobalListeners() {
         e.preventDefault();
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
-        adjustQuantity(id, 1);
+        const product = products.find(p => p.id == id);
+        if (product) {
+          const units = getProductUnits(product);
+          if (units.length > 1) {
+            openProductDetail(id);
+          } else {
+            adjustQuantity(id, 1, units[0] || '', 0);
+          }
+        }
         return;
       } else if (btn.classList.contains('qty-square-btn')) {
         e.preventDefault();
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
         const delta = parseInt(btn.dataset.delta);
-        adjustQuantity(id, delta);
+        const unit = btn.dataset.unit || '';
+        const product = products.find(p => p.id == id);
+        if (product) {
+          const units = getProductUnits(product);
+          const idx = units.indexOf(unit);
+          adjustQuantity(id, delta, unit, idx >= 0 ? idx : 0);
+        } else {
+          adjustQuantity(id, delta, unit, 0);
+        }
         return;
       }
     }
@@ -472,14 +643,12 @@ let closedBannerShown = false;
 function updateStoreStatusUI() {
   const mainElement = document.querySelector('main');
   if (!mainElement) return;
-  // Remove existing banner if any
   const existing = document.getElementById('storeClosedBanner');
   if (existing) existing.remove();
 
   const isOpen = isStoreOpenNow();
   isStoreOpen = isOpen;
 
-  // Update order button state (if exists)
   const orderBtn = document.getElementById('orderBtn');
   if (orderBtn) {
     if (!isOpen) {
@@ -491,27 +660,26 @@ function updateStoreStatusUI() {
     }
   }
 
-  // Show/hide sticky cart order button? We'll handle separately.
-
   if (!isOpen) {
+    const statusMsg = getStoreStatusMessage();
+    const nextOpenTime = getNextOpenTimeStr();
     const banner = document.createElement('div');
     banner.id = 'storeClosedBanner';
     banner.className = 'store-closed-banner';
-    const statusMsg = getStoreStatusMessage();
     banner.innerHTML = `
-      <span class="icon"><i class="fas fa-store-alt-slash"></i></span>
-      <span class="message"><strong>🕒 Store is currently closed</strong><br>${statusMsg}</span>
-      <span class="times">${OPENING_HOURS.map(slot => {
-        const startH = Math.floor(slot.start/60);
-        const startM = slot.start%60;
-        const endH = Math.floor(slot.end/60);
-        const endM = slot.end%60;
-        const startStr = new Date(0,0,0,startH,startM).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-        const endStr = new Date(0,0,0,endH,endM).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-        return `${startStr} - ${endStr}`;
-      }).join(' | ')}</span>
+      <div class="banner-icon"><i class="fas fa-store-alt-slash"></i></div>
+      <div class="banner-content">
+        <div class="banner-title">
+          🕒 We're Closed Right Now
+          <span>Closed</span>
+        </div>
+        <div class="banner-message">${statusMsg}</div>
+      </div>
+      <div class="banner-next-open">
+        <i class="fas fa-clock"></i>
+        Next Open: <span class="time">${nextOpenTime}</span>
+      </div>
     `;
-    // Insert after category header
     const catHeader = document.querySelector('.category-header');
     if (catHeader && catHeader.nextSibling) {
       mainElement.insertBefore(banner, catHeader.nextSibling);
@@ -521,6 +689,17 @@ function updateStoreStatusUI() {
     closedBannerShown = true;
   } else {
     closedBannerShown = false;
+  }
+}
+
+// ========== LOCATION WARNING (out of boundary) ==========
+function updateLocationWarning(isValid) {
+  const warningEl = document.getElementById('locationWarning');
+  if (!warningEl) return;
+  if (!isValid) {
+    warningEl.style.display = 'flex';
+  } else {
+    warningEl.style.display = 'none';
   }
 }
 
@@ -659,7 +838,10 @@ function renderOffersPage() {
         qty: 999,
         description: offer.description || '',
         highlight: offer.highlight || '',
-        othr_img: offer.othr_img || ''
+        othr_img: offer.othr_img || '',
+        units: [offer.unit],
+        prices: [offer.oldPrice],
+        discountPrices: [offer.newPrice]
       };
       html += createProductCard(fakeProduct, true);
     });
@@ -760,7 +942,7 @@ function closeOfferModal() {
 
 function addOfferToCart() {
   if (currentOffer && currentOffer.productId) {
-    adjustQuantity(currentOffer.productId, 1);
+    adjustQuantity(currentOffer.productId, 1, currentOffer.unit || '', 0);
     closeOfferModal();
   } else {
     showToast("Product not found for this offer");
@@ -827,7 +1009,7 @@ function renderCustomHomeLayout() {
   attachCategorySquareEvents();
   renderHomeCarousel(nextTen);
   renderOffersTeaser();
-  updateStoreStatusUI(); // show closed banner if needed
+  updateStoreStatusUI();
 }
 
 function initSlideshow() {
@@ -1048,7 +1230,7 @@ function renderProducts() {
   } else {
     renderFilteredGrid();
   }
-  updateStoreStatusUI(); // ensure banner is shown if closed
+  updateStoreStatusUI();
 }
 
 function getCategoryList() {
@@ -1167,8 +1349,8 @@ function initSearchListeners() {
 
 // ========== CART RENDERING ==========
 function renderCart() {
-  const ids = Object.keys(cart).filter(id => cart[id] > 0);
-  if (!ids.length) {
+  const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+  if (!keys.length) {
     cartItems.innerHTML = `<div class="cart-empty"><i class="fas fa-shopping-cart"></i><p>Cart empty</p></div>`;
     cartFooter.style.display = 'none';
     updateStickyCartBar();
@@ -1176,18 +1358,38 @@ function renderCart() {
   }
   let total = 0, count = 0, totalSaved = 0;
   let cartHtml = '';
-  ids.forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const effectivePrice = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    const originalPrice = p.price;
-    const sub = effectivePrice * qty;
-    const saved = (originalPrice - effectivePrice) * qty;
+  keys.forEach(key => {
+    const [productId, unit] = key.split('_');
+    const p = products.find(x => x.id == parseInt(productId));
+    if (!p) return;
+    const item = cart[key];
+    const qty = item.qty;
+    const price = item.price || 0;
+    const originalPrice = getProductPrice(p, 0) || p.price || 0;
+    const sub = price * qty;
+    const saved = (originalPrice - price) * qty;
     total += sub;
     count += qty;
     totalSaved += saved;
     const imgSrc = getProductImageUrl(p);
-    cartHtml += `<div class="cart-item"><div class="cart-item-emoji"><img src="${imgSrc}" alt="${p.name}"></div><div class="cart-item-info"><div class="cart-item-name">${escapeHtml(p.name)}</div><div class="cart-item-price-original">${originalPrice > effectivePrice ? `<span class="original-price">₹${originalPrice}</span>` : ''}<span class="discount-price">₹${effectivePrice}</span></div>${saved > 0 ? `<div class="cart-item-saved">You saved: ₹${saved}</div>` : ''}</div><div class="cart-item-qty"><button class="cqty-btn" data-id="${id}" data-delta="-1"><i class="fas fa-minus"></i></button><span>${qty}</span><button class="cqty-btn" data-id="${id}" data-delta="1"><i class="fas fa-plus"></i></button><button class="remove-btn" data-id="${id}" data-remove="all"><i class="fas fa-trash-alt"></i></button></div></div>`;
+    cartHtml += `<div class="cart-item">
+      <div class="cart-item-emoji"><img src="${imgSrc}" alt="${p.name}"></div>
+      <div class="cart-item-info">
+        <div class="cart-item-name">${escapeHtml(p.name)}</div>
+        <div class="cart-item-unit">${escapeHtml(unit)}</div>
+        <div class="cart-item-price-original">
+          ${originalPrice > price ? `<span class="original-price">₹${originalPrice}</span>` : ''}
+          <span class="discount-price">₹${price}</span>
+        </div>
+        ${saved > 0 ? `<div class="cart-item-saved">You saved: ₹${saved}</div>` : ''}
+      </div>
+      <div class="cart-item-qty">
+        <button class="cqty-btn" data-key="${key}" data-delta="-1"><i class="fas fa-minus"></i></button>
+        <span>${qty}</span>
+        <button class="cqty-btn" data-key="${key}" data-delta="1"><i class="fas fa-plus"></i></button>
+        <button class="remove-btn" data-key="${key}" data-remove="all"><i class="fas fa-trash-alt"></i></button>
+      </div>
+    </div>`;
   });
   cartItems.innerHTML = cartHtml;
   footerItems.textContent = count;
@@ -1204,14 +1406,24 @@ function renderCart() {
   document.querySelectorAll('.cqty-btn').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
-    newBtn.addEventListener('click', () => adjustQuantity(parseInt(newBtn.dataset.id), parseInt(newBtn.dataset.delta)));
+    newBtn.addEventListener('click', () => {
+      const key = newBtn.dataset.key;
+      const delta = parseInt(newBtn.dataset.delta);
+      const [productId, unit] = key.split('_');
+      const p = products.find(x => x.id == parseInt(productId));
+      if (p) {
+        const units = getProductUnits(p);
+        const idx = units.indexOf(unit);
+        adjustQuantity(parseInt(productId), delta, unit, idx >= 0 ? idx : 0);
+      }
+    });
   });
   document.querySelectorAll('.remove-btn').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
     newBtn.addEventListener('click', () => {
-      const id = parseInt(newBtn.dataset.id);
-      delete cart[id];
+      const key = newBtn.dataset.key;
+      delete cart[key];
       saveCart(cart);
       updateCartCountUI();
       renderProducts();
@@ -1244,20 +1456,23 @@ function toggleStickyDetailed() {
 function renderStickyDetailedList() {
   const container = document.getElementById('stickyCartProductsList');
   if (!container) return;
-  const ids = Object.keys(cart).filter(id => cart[id] > 0);
-  if (ids.length === 0) {
+  const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+  if (keys.length === 0) {
     container.innerHTML = '';
     return;
   }
   let detailedHtml = '';
   let totalItems = 0;
   let totalSavings = 0;
-  ids.forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const effectivePrice = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    const originalPrice = p.price;
-    const saved = (originalPrice - effectivePrice) * qty;
+  keys.forEach(key => {
+    const [productId, unit] = key.split('_');
+    const p = products.find(x => x.id == parseInt(productId));
+    if (!p) return;
+    const item = cart[key];
+    const qty = item.qty;
+    const price = item.price || 0;
+    const originalPrice = getProductPrice(p, 0) || p.price || 0;
+    const saved = (originalPrice - price) * qty;
     totalItems += qty;
     totalSavings += saved;
     const imgSrc = getProductImageUrl(p);
@@ -1266,17 +1481,17 @@ function renderStickyDetailedList() {
         <img class="sticky-detailed-img" src="${imgSrc}" alt="${p.name}">
         <div class="sticky-detailed-info">
           <div class="sticky-detailed-name">${escapeHtml(p.name)}</div>
-          <div class="sticky-detailed-unit">${p.unit}</div>
+          <div class="sticky-detailed-unit">${escapeHtml(unit)}</div>
           <div class="sticky-detailed-prices">
-            ${originalPrice > effectivePrice ? `<span class="sticky-detailed-original">₹${originalPrice}</span>` : ''}
-            <span class="sticky-detailed-discount">₹${effectivePrice}</span>
+            ${originalPrice > price ? `<span class="sticky-detailed-original">₹${originalPrice}</span>` : ''}
+            <span class="sticky-detailed-discount">₹${price}</span>
             ${saved > 0 ? `<span class="sticky-detailed-saved">(save ₹${saved})</span>` : ''}
           </div>
         </div>
         <div class="sticky-detailed-qty">
-          <button class="sticky-qty-btn" data-id="${p.id}" data-delta="-1">-</button>
+          <button class="sticky-qty-btn" data-key="${key}" data-delta="-1">-</button>
           <span class="sticky-qty-value">${qty}</span>
-          <button class="sticky-qty-btn" data-id="${p.id}" data-delta="1">+</button>
+          <button class="sticky-qty-btn" data-key="${key}" data-delta="1">+</button>
         </div>
       </div>
     `;
@@ -1292,9 +1507,15 @@ function renderStickyDetailedList() {
     btn.parentNode.replaceChild(newBtn, btn);
     newBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const productId = parseInt(newBtn.dataset.id);
+      const key = newBtn.dataset.key;
       const delta = parseInt(newBtn.dataset.delta);
-      adjustQuantity(productId, delta);
+      const [productId, unit] = key.split('_');
+      const p = products.find(x => x.id == parseInt(productId));
+      if (p) {
+        const units = getProductUnits(p);
+        const idx = units.indexOf(unit);
+        adjustQuantity(parseInt(productId), delta, unit, idx >= 0 ? idx : 0);
+      }
     });
   });
 }
@@ -1304,8 +1525,8 @@ function updateStickyCartBar() {
     if (stickyBar) stickyBar.style.display = 'none';
     return;
   }
-  const ids = Object.keys(cart).filter(id => cart[id] > 0);
-  const itemCount = ids.reduce((sum, id) => sum + cart[id], 0);
+  const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+  const itemCount = keys.reduce((sum, k) => sum + cart[k].qty, 0);
   if (itemCount === 0) {
     if (stickyBar) stickyBar.style.display = 'none';
     document.body.classList.remove('cart-not-empty');
@@ -1318,13 +1539,16 @@ function updateStickyCartBar() {
   
   let totalSaved = 0;
   let subtotal = 0;
-  ids.forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const effectivePrice = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    const saved = (p.price - effectivePrice) * qty;
+  keys.forEach(key => {
+    const [productId, unit] = key.split('_');
+    const p = products.find(x => x.id == parseInt(productId));
+    if (!p) return;
+    const item = cart[key];
+    const price = item.price || 0;
+    const originalPrice = getProductPrice(p, 0) || p.price || 0;
+    const saved = (originalPrice - price) * item.qty;
     totalSaved += saved;
-    subtotal += effectivePrice * qty;
+    subtotal += price * item.qty;
   });
   const freeDelivery = subtotal > FREE_DELIVERY_THRESHOLD;
   if (stickyCountSpan) stickyCountSpan.textContent = itemCount;
@@ -1345,8 +1569,8 @@ function openCart() {
 function closeCart() {
   cartOverlay.classList.remove('open');
   cartPanel.classList.remove('open');
-  const ids = Object.keys(cart).filter(id => cart[id] > 0);
-  if (ids.length > 0 && stickyBar) {
+  const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+  if (keys.length > 0 && stickyBar) {
     stickyBar.style.display = 'block';
     updateStickyCartBar();
   } else if (stickyBar) {
@@ -1357,23 +1581,23 @@ function closeCart() {
 // ========== ADDRESS FLOW ==========
 function getCartSubtotal() {
   let subtotal = 0;
-  Object.keys(cart).forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    subtotal += price * qty;
+  Object.keys(cart).forEach(key => {
+    const item = cart[key];
+    subtotal += item.price * item.qty;
   });
   return subtotal;
 }
 
 function getCartTotalSavings() {
   let savings = 0;
-  Object.keys(cart).forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const originalPrice = p.price;
-    const effectivePrice = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    savings += (originalPrice - effectivePrice) * qty;
+  Object.keys(cart).forEach(key => {
+    const [productId, unit] = key.split('_');
+    const p = products.find(x => x.id == parseInt(productId));
+    if (!p) return;
+    const item = cart[key];
+    const price = item.price || 0;
+    const originalPrice = getProductPrice(p, 0) || p.price || 0;
+    savings += (originalPrice - price) * item.qty;
   });
   return savings;
 }
@@ -1429,6 +1653,7 @@ function createMap(initialLat = null, initialLng = null) {
     const distance = getDistanceKm(ADAT_LAT, ADAT_LON, pos.lat, pos.lng);
     if (distance <= MAX_DISTANCE_KM) {
       currentLocationValid = true;
+      updateLocationWarning(true);
       try {
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.lat}&lon=${pos.lng}&zoom=18&addressdetails=1`);
         const data = await response.json();
@@ -1449,6 +1674,7 @@ function createMap(initialLat = null, initialLng = null) {
       }
     } else {
       currentLocationValid = false;
+      updateLocationWarning(false);
       showToast("❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.");
       const displayDiv = document.getElementById('selectedLocationDisplay');
       if (displayDiv) displayDiv.innerHTML = '';
@@ -1479,6 +1705,11 @@ function attemptAutoLocation() {
           showToast("📍 Location set to your current position");
         } else {
           showToast("📍 Your location is outside delivery area. Please drag marker inside the circle.");
+          updateLocationWarning(false);
+          // Still set the marker but show warning
+          map.setView([userLat, userLng], 15);
+          marker.setLatLng([userLat, userLng]);
+          currentLocationValid = false;
         }
       },
       (error) => {
@@ -1509,6 +1740,10 @@ function useCurrentLocation() {
           showToast("📍 Location updated");
         } else {
           showToast("❌ Your location is outside our 5 km delivery area. Please drag the marker inside the circle.");
+          updateLocationWarning(false);
+          map.setView([userLat, userLng], 15);
+          marker.setLatLng([userLat, userLng]);
+          currentLocationValid = false;
         }
       },
       (error) => {
@@ -1543,11 +1778,13 @@ function showStep(step) {
     let ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
     let total = subtotal + deliveryCharge + ecoCharge;
     let summaryHtml = '';
-    Object.keys(cart).forEach(id => {
-      const p = products.find(x => x.id == id);
-      const qty = cart[id];
-      const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-      summaryHtml += `<div>${p.name} ×${qty} = ₹${price * qty}</div>`;
+    Object.keys(cart).forEach(key => {
+      const [productId, unit] = key.split('_');
+      const p = products.find(x => x.id == parseInt(productId));
+      if (!p) return;
+      const item = cart[key];
+      const price = item.price || 0;
+      summaryHtml += `<div>${p.name} (${unit}) ×${item.qty} = ₹${price * item.qty}</div>`;
     });
     const orderSummary = document.getElementById('confirmOrderSummary');
     if (orderSummary) orderSummary.innerHTML = summaryHtml;
@@ -1609,11 +1846,13 @@ function showSavedSummary() {
   const total = subtotal + deliveryCharge + ecoCharge;
 
   let itemsHtml = '';
-  Object.keys(cart).forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    itemsHtml += `<div class="order-summary-item">${p.name} ×${qty} = ₹${price * qty}</div>`;
+  Object.keys(cart).forEach(key => {
+    const [productId, unit] = key.split('_');
+    const p = products.find(x => x.id == parseInt(productId));
+    if (!p) return;
+    const item = cart[key];
+    const price = item.price || 0;
+    itemsHtml += `<div class="order-summary-item">${p.name} (${unit}) ×${item.qty} = ₹${price * item.qty}</div>`;
   });
 
   const summaryHtml = `
@@ -1700,9 +1939,11 @@ function openAddressFlow() {
     const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
     if (distance <= MAX_DISTANCE_KM) {
       showSavedSummary();
+      updateLocationWarning(true);
     } else {
       showToast("⚠️ Your saved location is outside delivery area. Please update your location on the map.");
       startMultiStepFlow();
+      updateLocationWarning(false);
     }
   } else {
     startMultiStepFlow();
@@ -1713,6 +1954,7 @@ function closeAddressFlow() {
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'none';
   hideLoadingOverlay();
+  updateLocationWarning(true);
 }
 
 function handleBack() {
@@ -1748,11 +1990,13 @@ function sendFinalWhatsApp() {
   const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
 
   let itemsList = '';
-  Object.keys(cart).forEach(id => {
-    const p = products.find(x => x.id == id);
-    const qty = cart[id];
-    const price = (p.discountPrice && p.discountPrice > 0) ? p.discountPrice : p.price;
-    itemsList += `  🛒 ${p.name} x ${qty} ${p.unit} = ₹${price * qty}\n`;
+  Object.keys(cart).forEach(key => {
+    const [productId, unit] = key.split('_');
+    const p = products.find(x => x.id == parseInt(productId));
+    if (!p) return;
+    const item = cart[key];
+    const price = item.price || 0;
+    itemsList += `  🛒 ${p.name} (${unit}) x ${item.qty} = ₹${price * item.qty}\n`;
   });
   const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: ₹${ECO_BOX_CHARGE}\n` : '';
   const deliveryLine = deliveryCharge > 0 ? `🚚 Delivery charge: ₹${deliveryCharge}\n` : '';
@@ -2055,7 +2299,7 @@ function openCategoriesModal() {
 }
 function closeCategoriesModal() { categoriesModal.classList.remove('open'); }
 
-// ========== LOAD DATA (WITH CONFIG, ALL PRODUCT SHEETS, OFFERS) ==========
+// ========== LOAD DATA ==========
 function loadData() {
   const baseUrl = 'https://opensheet.elk.sh/1FEpSYZlTrlp0BYPEcVCYISC0kgXpt_3Fcw5XAcjLOvs';
   
@@ -2093,7 +2337,6 @@ function loadData() {
               DELIVERY_CHARGE = parseFloat(val);
               break;
             case 'opening_hours':
-              // expected value like "6-8,17-20" or "6-8am,5-8pm"
               OPENING_HOURS = parseOpeningHours(val);
               break;
           }
@@ -2104,7 +2347,6 @@ function loadData() {
     .catch(err => console.warn('⚠️ Config sheet not found, using defaults', err))
     .finally(() => {
       loadProductsAndOffers(baseUrl);
-      // After products loaded, update store status
       updateStoreStatusUI();
     });
 }
@@ -2174,12 +2416,26 @@ function loadProductsAndOffers(baseUrl) {
             productQty = 0;
           }
         }
+        
+        const unitStr = item.Unit || 'unit';
+        const units = unitStr.split(',').map(u => u.trim()).filter(u => u);
+        const priceStr = item.Price ? String(item.Price) : '';
+        const priceParts = priceStr.split(',').map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
+        const discountStr = item['Price-off'] ? String(item['Price-off']) : '';
+        const discountParts = discountStr.split(',').map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
+        
+        const prices = (priceParts.length === units.length) ? priceParts : (priceParts.length > 0 ? [priceParts[0]] : []);
+        const discountPrices = (discountParts.length === units.length) ? discountParts : (discountParts.length > 0 ? [discountParts[0]] : []);
+        
         return {
           id: startId + idx,
           name: item.Name || 'Fresh Item',
           price: Number(item.Price) || 0,
           discountPrice: item['Price-off'] ? Number(item['Price-off']) : 0,
-          unit: item.Unit || 'unit',
+          unit: unitStr,
+          units: units,
+          prices: prices,
+          discountPrices: discountPrices,
           category: category,
           imageUrl: item.Emoji || '',
           showOnHomeRaw: item.ShowOnHome || `yes${idx+1}`,
@@ -2237,12 +2493,12 @@ function loadProductsAndOffers(baseUrl) {
   }).catch(err => {
     console.error("Sheet fetch error, using fallback data:", err);
     products = [
-      { id:1, name:'Fresh Tomato', price:40, discountPrice:35, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes1', offer:true, isOrganic:false, tags:'tomato', label:'', qty:10, description:'Juicy red tomatoes, perfect for salads and cooking.', highlight:'Rich in Vitamin C', othr_img:'' },
-      { id:2, name:'Onion', price:40, discountPrice:0, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes2', offer:false, isOrganic:false, tags:'onion', label:'', qty:0, description:'Fresh onions, essential for every kitchen.', highlight:'', othr_img:'' },
-      { id:3, name:'Lady Finger', price:70, discountPrice:60, unit:'1kg', category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:true, isOrganic:false, tags:'okra', label:'buy 1 get 1', qty:5, description:'Tender lady fingers, great for curries.', highlight:'High in fiber', othr_img:'' },
-      { id:4, name:'Carrot', price:45, discountPrice:0, unit:'kg', category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:false, isOrganic:false, tags:'carrot', label:'', qty:3, description:'Crunchy carrots, rich in vitamins.', highlight:'Good for eyesight', othr_img:'' },
-      { id:5, name:'Broccoli', price:80, discountPrice:70, unit:'piece', category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:true, tags:'broccoli', label:'', qty:2, description:'Fresh organic broccoli, high in fiber.', highlight:'Superfood', othr_img:'' },
-      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'bunch', category:'vegitable-fresh-leafs', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8, description:'Nutrient-rich spinach leaves.', highlight:'Iron-rich', othr_img:'' }
+      { id:1, name:'Fresh Tomato', price:40, discountPrice:35, unit:'1kg, 500g', units:['1kg', '500g'], prices:[40, 25], discountPrices:[35, 20], category:'vegitable-fresh', showOnHomeRaw:'yes1', offer:true, isOrganic:false, tags:'tomato', label:'', qty:10, description:'Juicy red tomatoes, perfect for salads and cooking.', highlight:'Rich in Vitamin C, Fresh from farm', othr_img:'' },
+      { id:2, name:'Onion', price:40, discountPrice:0, unit:'1kg', units:['1kg'], prices:[40], discountPrices:[0], category:'vegitable-fresh', showOnHomeRaw:'yes2', offer:false, isOrganic:false, tags:'onion', label:'', qty:0, description:'Fresh onions, essential for every kitchen.', highlight:'', othr_img:'' },
+      { id:3, name:'Lady Finger', price:70, discountPrice:60, unit:'500g, 1kg', units:['500g', '1kg'], prices:[40, 70], discountPrices:[30, 60], category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:true, isOrganic:false, tags:'okra', label:'buy 1 get 1', qty:5, description:'Tender lady fingers, great for curries.', highlight:'High in fiber, Fresh stock', othr_img:'' },
+      { id:4, name:'Carrot', price:45, discountPrice:0, unit:'1kg', units:['1kg'], prices:[45], discountPrices:[0], category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:false, isOrganic:false, tags:'carrot', label:'', qty:3, description:'Crunchy carrots, rich in vitamins.', highlight:'Good for eyesight, Organic', othr_img:'' },
+      { id:5, name:'Broccoli', price:80, discountPrice:70, unit:'250g, 500g', units:['250g', '500g'], prices:[45, 80], discountPrices:[35, 70], category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:true, tags:'broccoli', label:'', qty:2, description:'Fresh organic broccoli, high in fiber.', highlight:'Superfood, Rich in antioxidants', othr_img:'' },
+      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'1kg', units:['1kg'], prices:[25], discountPrices:[20], category:'vegitable-fresh-leafs', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8, description:'Nutrient-rich spinach leaves.', highlight:'Iron-rich, Organic', othr_img:'' }
     ];
     offers = [];
     renderCategories();
@@ -2355,6 +2611,7 @@ function initAddressFlow() {
         renderAccountModal();
         showToast('✅ Profile saved');
       } else {
+        // Order mode - send WhatsApp
         sendFinalWhatsApp();
       }
     });
@@ -2375,6 +2632,16 @@ function initAddressFlow() {
         sendOrderFromSummary();
       }
     });
+    
+    // Update button text based on mode
+    function updateSummaryButtonText() {
+      if (sendSummaryBtn) {
+        sendSummaryBtn.textContent = isLoginMode ? '💾 Save Profile' : '📦 Confirm Order';
+      }
+    }
+    // Call initially and when mode changes
+    updateSummaryButtonText();
+    // Override the onclick to handle mode properly
   }
 
   document.getElementById('useMyLocationBtn').addEventListener('click', useCurrentLocation);
@@ -2458,9 +2725,14 @@ document.addEventListener('DOMContentLoaded', () => {
   slideshowImages = document.getElementById('slideshowImages');
   slideshowDots = document.getElementById('slideshowDots');
   detailName = document.getElementById('detailName');
-  detailUnit = document.getElementById('detailUnit');
+  detailUnitDisplay = document.getElementById('detailUnitDisplay');
+  detailUnitWrapper = document.getElementById('detailUnitWrapper');
+  detailUnitSelector = document.getElementById('detailUnitSelector');
+  unitOptions = document.getElementById('unitOptions');
   detailPrice = document.getElementById('detailPrice');
-  detailHighlight = document.getElementById('detailHighlight');
+  detailSelectedPrice = document.getElementById('detailSelectedPrice');
+  detailHighlights = document.getElementById('detailHighlights');
+  highlightsList = document.getElementById('highlightsList');
   detailDescription = document.getElementById('detailDescription');
   detailAddBtn = document.getElementById('detailAddBtn');
 
@@ -2471,6 +2743,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   detailAddBtn.addEventListener('click', addProductFromDetail);
+
+  // Initialize location warning with max distance
+  const warningEl = document.getElementById('locationWarning');
+  if (warningEl) {
+    const distSpan = document.getElementById('maxDistDisplay');
+    const labelSpan = document.getElementById('maxDistKmLabel');
+    if (distSpan) distSpan.textContent = MAX_DISTANCE_KM;
+    if (labelSpan) labelSpan.textContent = MAX_DISTANCE_KM;
+  }
 
   setupGlobalListeners();
   initSearchListeners();

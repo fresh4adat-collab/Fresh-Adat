@@ -232,6 +232,13 @@
           <span class="step" data-step="3">👤 Personal</span>
           <span class="step" data-step="4">✅ Confirm</span>
         </div>
+
+        <!-- Location out of boundary persistent message -->
+        <div id="locationWarning" class="location-warning" style="display: none;">
+          <i class="fas fa-exclamation-triangle"></i>
+          <span>📍 Your location is outside our delivery area. Please select a location within <span id="maxDistDisplay">5</span> km of Adat.</span>
+        </div>
+
         <div id="savedSummaryCard" class="saved-summary-card" style="display: none;">
           <div class="summary-card-header">
             <i class="fas fa-check-circle"></i>
@@ -247,7 +254,7 @@
           <div class="step-content" id="step1Content">
             <div class="eco-message">✅ Delivered in reusable eco‑boxes<br>♻️ Please return the empty box after delivery</div>
             <div id="locationMap" style="height: 300px; width: 100%; border-radius: 16px; margin: 16px 0;"></div>
-            <p class="location-hint">Drag the marker to your exact delivery location (within 5 km of Adat).</p>
+            <p class="location-hint">Drag the marker to your exact delivery location (within <span id="maxDistKmLabel">5</span> km of Adat).</p>
             <button id="useMyLocationBtn" class="use-location-btn"><i class="fas fa-location-dot"></i> Use my current location</button>
             <div class="selected-location" id="selectedLocationDisplay"></div>
             <button id="confirmLocationBtn" class="next-step-btn" disabled>Confirm Location</button>
@@ -287,7 +294,7 @@
               <div class="eco-box-charge" id="ecoBoxChargeLine" style="display: none;">+ Eco‑box charge: ₹10</div>
               <div class="final-total" id="confirmFinalTotal"></div>
             </div>
-            <button id="sendWhatsAppFinalBtn" class="send-order-btn"><i class="fab fa-whatsapp"></i> Send Order via WhatsApp</button>
+            <button id="sendWhatsAppFinalBtn" class="send-order-btn"><i class="fas fa-check"></i> Confirm Order</button>
           </div>
         </div>
       </div>
@@ -314,28 +321,52 @@
     </div>
   </div>
 
-  <!-- ===== PRODUCT DETAIL MODAL ===== -->
+  <!-- ===== PRODUCT DETAIL MODAL (FULL SCREEN) ===== -->
   <div id="productDetailModal" class="product-detail-modal" style="display: none;">
     <div class="product-detail-overlay"></div>
     <div class="product-detail-container">
-      <button class="close-product-detail" id="closeProductDetail">&times;</button>
-      
+      <!-- Close Button -->
+      <button class="close-product-detail" id="closeProductDetail">
+        <i class="fas fa-times"></i>
+      </button>
+
       <!-- Image Slideshow -->
       <div class="product-detail-slideshow">
         <div class="slideshow-images" id="slideshowImages"></div>
-        <button class="slideshow-nav prev" id="slideshowPrev">‹</button>
-        <button class="slideshow-nav next" id="slideshowNext">›</button>
+        <button class="slideshow-nav prev" id="slideshowPrev"><i class="fas fa-chevron-left"></i></button>
+        <button class="slideshow-nav next" id="slideshowNext"><i class="fas fa-chevron-right"></i></button>
         <div class="slideshow-dots" id="slideshowDots"></div>
       </div>
-      
+
       <!-- Product Info -->
       <div class="product-detail-info">
         <div class="product-detail-name" id="detailName"></div>
-        <div class="product-detail-unit highlight-unit" id="detailUnit"></div>
-        <div class="product-detail-price" id="detailPrice"></div>
-        <div class="product-detail-highlight" id="detailHighlight"></div>
+        <div class="product-detail-unit-wrapper" id="detailUnitWrapper">
+          <div class="product-detail-unit highlight-unit" id="detailUnitDisplay"></div>
+          <!-- Unit selector (shown if multiple units) -->
+          <div class="product-detail-unit-selector" id="detailUnitSelector" style="display: none;">
+            <span class="selector-label"><i class="fas fa-weight-scale"></i> Select Weight</span>
+            <div class="unit-options" id="unitOptions"></div>
+            <!-- Price display for selected unit -->
+            <div class="selected-unit-price" id="detailSelectedPrice"></div>
+          </div>
+        </div>
+
+        <!-- Highlights Section -->
+        <div class="product-detail-highlights" id="detailHighlights" style="display: none;">
+          <div class="highlights-title"><i class="fas fa-star"></i> Highlights</div>
+          <ul class="highlights-list" id="highlightsList"></ul>
+        </div>
+
+        <!-- Description -->
         <div class="product-detail-description" id="detailDescription"></div>
-        <button class="product-detail-add-btn" id="detailAddBtn"><i class="fas fa-plus"></i> Add to Cart</button>
+      </div>
+
+      <!-- Fixed Add to Cart Button -->
+      <div class="product-detail-fixed-bottom">
+        <button class="product-detail-add-btn" id="detailAddBtn">
+          <i class="fas fa-plus"></i> Add to Cart
+        </button>
       </div>
     </div>
   </div>
