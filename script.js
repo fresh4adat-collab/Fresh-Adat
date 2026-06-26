@@ -219,13 +219,11 @@ function saveCart(c) {
   localStorage.setItem('freshAdatCart', JSON.stringify(c));
 }
 
-// Helper: get units array from product
 function getProductUnits(product) {
   if (!product || !product.units) return [];
   return product.units.length > 0 ? product.units : [product.unit || 'unit'];
 }
 
-// Helper: get price for a given unit index
 function getProductPrice(product, unitIndex) {
   if (!product) return 0;
   if (product.prices && product.prices.length > unitIndex && product.prices[unitIndex] !== undefined) {
@@ -234,7 +232,6 @@ function getProductPrice(product, unitIndex) {
   return product.price || 0;
 }
 
-// Helper: get discount price for a given unit index
 function getProductDiscountPrice(product, unitIndex) {
   if (!product) return 0;
   if (product.discountPrices && product.discountPrices.length > unitIndex && product.discountPrices[unitIndex] !== undefined) {
@@ -243,7 +240,6 @@ function getProductDiscountPrice(product, unitIndex) {
   return product.discountPrice || 0;
 }
 
-// Helper: get effective price (discount if available) for a unit
 function getEffectivePrice(product, unitIndex) {
   const discount = getProductDiscountPrice(product, unitIndex);
   if (discount > 0 && discount < getProductPrice(product, unitIndex)) {
@@ -378,6 +374,7 @@ function openProductDetail(productId) {
         updateDetailPriceAndSelection(product, idx);
       });
     });
+    // Set initial price for the first unit
     updateDetailPriceAndSelection(product, 0);
   } else {
     detailUnitSelector.style.display = 'none';
@@ -390,7 +387,17 @@ function openProductDetail(productId) {
     } else {
       priceHtml = `<span class="single-price">₹${price}</span>`;
     }
-    detailPrice.innerHTML = priceHtml;
+    if (detailPrice) detailPrice.innerHTML = priceHtml;
+    // Also update the selected price area if it exists
+    if (detailSelectedPrice) {
+      let selPriceHtml = '';
+      if (originalPrice > price) {
+        selPriceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
+      } else {
+        selPriceHtml = `<span class="single-price">₹${price}</span>`;
+      }
+      detailSelectedPrice.innerHTML = selPriceHtml;
+    }
   }
 
   // Highlights
@@ -437,6 +444,7 @@ function openProductDetail(productId) {
 }
 
 function updateDetailPriceAndSelection(product, unitIndex) {
+  if (!detailPrice && !detailSelectedPrice) return;
   const price = getEffectivePrice(product, unitIndex);
   const originalPrice = getProductPrice(product, unitIndex);
   let priceHtml = '';
@@ -445,17 +453,15 @@ function updateDetailPriceAndSelection(product, unitIndex) {
   } else {
     priceHtml = `<span class="single-price">₹${price}</span>`;
   }
-  // Update the main price display (top)
-  detailPrice.innerHTML = priceHtml;
+  if (detailPrice) detailPrice.innerHTML = priceHtml;
   
-  // Update the selected unit price display below the selector
   let selectedPriceHtml = '';
   if (originalPrice > price) {
     selectedPriceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
   } else {
     selectedPriceHtml = `<span class="single-price">₹${price}</span>`;
   }
-  detailSelectedPrice.innerHTML = selectedPriceHtml;
+  if (detailSelectedPrice) detailSelectedPrice.innerHTML = selectedPriceHtml;
 }
 
 function renderSlideshow() {
@@ -692,7 +698,7 @@ function updateStoreStatusUI() {
   }
 }
 
-// ========== LOCATION WARNING (out of boundary) ==========
+// ========== LOCATION WARNING ==========
 function updateLocationWarning(isValid) {
   const warningEl = document.getElementById('locationWarning');
   if (!warningEl) return;
@@ -1706,7 +1712,6 @@ function attemptAutoLocation() {
         } else {
           showToast("📍 Your location is outside delivery area. Please drag marker inside the circle.");
           updateLocationWarning(false);
-          // Still set the marker but show warning
           map.setView([userLat, userLng], 15);
           marker.setLatLng([userLat, userLng]);
           currentLocationValid = false;
@@ -2637,11 +2642,24 @@ function initAddressFlow() {
     function updateSummaryButtonText() {
       if (sendSummaryBtn) {
         sendSummaryBtn.textContent = isLoginMode ? '💾 Save Profile' : '📦 Confirm Order';
+        sendSummaryBtn.innerHTML = isLoginMode ? '<i class="fas fa-save"></i> Save Profile' : '<i class="fas fa-check"></i> Confirm Order';
       }
     }
-    // Call initially and when mode changes
-    updateSummaryButtonText();
-    // Override the onclick to handle mode properly
+    // Call initially
+    setTimeout(updateSummaryButtonText, 100);
+    // Also call when mode changes (handled in openAddressFlowForLogin and openAddressFlow)
+    const origOpenAddressFlow = openAddressFlow;
+    openAddressFlow = function() {
+      isLoginMode = false;
+      origOpenAddressFlow.call(this);
+      setTimeout(updateSummaryButtonText, 200);
+    };
+    const origOpenAddressFlowForLogin = openAddressFlowForLogin;
+    openAddressFlowForLogin = function() {
+      isLoginMode = true;
+      origOpenAddressFlowForLogin.call(this);
+      setTimeout(updateSummaryButtonText, 200);
+    };
   }
 
   document.getElementById('useMyLocationBtn').addEventListener('click', useCurrentLocation);
