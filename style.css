@@ -2699,6 +2699,7 @@ body.cart-not-empty .bottom-nav-bar {
   margin: 4px 0 8px;
 }
 
+/* ===== PRODUCT DETAIL ADD BUTTON – FIXED BOTTOM ===== */
 .product-detail-fixed-bottom {
   position: absolute;
   bottom: 0;
@@ -2710,9 +2711,11 @@ body.cart-not-empty .bottom-nav-bar {
   z-index: 6;
   border-top: 1px solid #f0f0f0;
 }
+
+/* The main button container */
 .product-detail-add-btn {
   width: 100%;
-  background: linear-gradient(135deg, var(--green), var(--green-light));
+  background: var(--green);
   color: white;
   border: none;
   border-radius: 50px;
@@ -2726,18 +2729,89 @@ body.cart-not-empty .bottom-nav-bar {
   gap: 10px;
   transition: all 0.25s ease;
   box-shadow: 0 4px 16px rgba(26, 107, 60, 0.3);
+  min-height: 60px;
+  position: relative;
+  overflow: hidden;
 }
+
 .product-detail-add-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(26, 107, 60, 0.4);
 }
+
 .product-detail-add-btn:active {
   transform: scale(0.97);
 }
-.product-detail-add-btn i {
+
+/* "Add to Cart" text style */
+.product-detail-add-btn .add-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.product-detail-add-btn .add-text i {
   font-size: 1.1rem;
 }
 
+/* Quantity controls inside the button */
+.product-detail-add-btn .qty-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.product-detail-add-btn .qty-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(1.08);
+}
+
+.product-detail-add-btn .qty-btn:active {
+  transform: scale(0.92);
+}
+
+.product-detail-add-btn .qty-number {
+  font-size: 1.2rem;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+  color: white;
+  letter-spacing: 0.5px;
+}
+
+/* When the button is in "Add" mode (no quantity) */
+.product-detail-add-btn:not(:has(.qty-btn)) {
+  background: linear-gradient(135deg, var(--green), var(--green-light));
+}
+.product-detail-add-btn:not(:has(.qty-btn)):hover {
+  background: linear-gradient(135deg, var(--green-light), var(--green));
+}
+
+/* When the button has quantity controls (qty > 0) */
+.product-detail-add-btn:has(.qty-btn) {
+  background: var(--green);
+  padding: 12px 20px;
+  box-shadow: 0 4px 16px rgba(26, 107, 60, 0.35);
+}
+.product-detail-add-btn:has(.qty-btn):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(26, 107, 60, 0.45);
+}
+
+/* ===== Mobile Adjustments ===== */
 @media (max-width: 640px) {
   .product-detail-container {
     max-width: 100%;
@@ -2756,11 +2830,27 @@ body.cart-not-empty .bottom-nav-bar {
     padding: 16px 18px 100px;
   }
   .product-detail-fixed-bottom {
-    padding: 12px 18px 20px;
+    padding: 12px 18px 18px;
   }
   .product-detail-add-btn {
-    padding: 14px;
+    padding: 14px 16px;
     font-size: 1rem;
+    min-height: 54px;
+  }
+  .product-detail-add-btn .add-text {
+    font-size: 1rem;
+  }
+  .product-detail-add-btn .qty-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 1.2rem;
+  }
+  .product-detail-add-btn .qty-number {
+    font-size: 1.1rem;
+    min-width: 24px;
+  }
+  .product-detail-add-btn:has(.qty-btn) {
+    padding: 10px 16px;
   }
   .close-product-detail {
     top: 10px;

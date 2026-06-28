@@ -283,6 +283,7 @@ function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex) {
   renderProducts();
   if (cartPanel && cartPanel.classList.contains('open')) renderCart();
   updateStickyCartBar();
+  updateDetailAddButton(); // update the detail modal button if open
   if (delta > 0 && newQty <= MAX_QTY_PER_PRODUCT) showToast('Added to cart');
   else if (delta < 0) showToast('Removed');
 
@@ -372,13 +373,12 @@ function openProductDetail(productId) {
         unitOptions.querySelectorAll('.unit-option').forEach(b => b.classList.remove('active'));
         this.classList.add('active');
         updateDetailPriceAndSelection(product, idx);
+        updateDetailAddButton(); // update button for new unit
       });
     });
-    // Set initial price for the first unit
     updateDetailPriceAndSelection(product, 0);
   } else {
     detailUnitSelector.style.display = 'none';
-    // Show price in the main price area
     const price = getEffectivePrice(product, 0);
     const originalPrice = getProductPrice(product, 0);
     let priceHtml = '';
@@ -388,7 +388,6 @@ function openProductDetail(productId) {
       priceHtml = `<span class="single-price">₹${price}</span>`;
     }
     if (detailPrice) detailPrice.innerHTML = priceHtml;
-    // Also update the selected price area if it exists
     if (detailSelectedPrice) {
       let selPriceHtml = '';
       if (originalPrice > price) {
@@ -439,6 +438,8 @@ function openProductDetail(productId) {
   renderSlideshow();
 
   detailAddBtn.dataset.productId = product.id;
+  updateDetailAddButton(); // set initial state
+
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
@@ -462,6 +463,36 @@ function updateDetailPriceAndSelection(product, unitIndex) {
     selectedPriceHtml = `<span class="single-price">₹${price}</span>`;
   }
   if (detailSelectedPrice) detailSelectedPrice.innerHTML = selectedPriceHtml;
+}
+
+// ===== UPDATE DETAIL ADD BUTTON WITH QUANTITY CONTROLS =====
+function updateDetailAddButton() {
+  const productId = parseInt(detailAddBtn.dataset.productId);
+  if (!productId) {
+    detailAddBtn.innerHTML = `<span class="add-text">Add to Cart</span>`;
+    return;
+  }
+  const product = products.find(p => p.id === productId);
+  if (!product) {
+    detailAddBtn.innerHTML = `<span class="add-text">Add to Cart</span>`;
+    return;
+  }
+  const units = getProductUnits(product);
+  const idx = selectedUnitIndex;
+  const unit = units[idx] || units[0] || product.unit || 'unit';
+  const cartKey = `${productId}_${unit}`;
+  const cartItem = cart[cartKey];
+  const qty = cartItem ? cartItem.qty : 0;
+  
+  if (qty > 0) {
+    detailAddBtn.innerHTML = `
+      <button class="qty-btn minus" data-id="${productId}" data-unit="${unit}" data-delta="-1">−</button>
+      <span class="qty-number">${qty}</span>
+      <button class="qty-btn plus" data-id="${productId}" data-unit="${unit}" data-delta="1">+</button>
+    `;
+  } else {
+    detailAddBtn.innerHTML = `<span class="add-text">Add to Cart</span>`;
+  }
 }
 
 function renderSlideshow() {
@@ -537,14 +568,37 @@ function closeProductDetail() {
   }
 }
 
-function addProductFromDetail() {
-  const productId = parseInt(detailAddBtn.dataset.productId);
-  if (productId) {
-    const product = products.find(p => p.id == productId);
+// This function handles clicks on the detail add button container
+function handleDetailAddClick(e) {
+  const target = e.target;
+  const btn = target.closest('.qty-btn');
+  if (btn) {
+    e.stopPropagation();
+    const productId = parseInt(btn.dataset.id);
+    const delta = parseInt(btn.dataset.delta);
+    const unit = btn.dataset.unit;
+    const product = products.find(p => p.id === productId);
     if (product) {
       const units = getProductUnits(product);
-      const idx = selectedUnitIndex;
-      const unit = units[idx] || units[0] || product.unit || 'unit';
+      const idx = units.indexOf(unit);
+      adjustQuantity(productId, delta, unit, idx >= 0 ? idx : 0);
+    }
+    return;
+  }
+  // If not a qty button, check if it's the "Add to Cart" text (click on container)
+  if (target.closest('.add-text') || target === detailAddBtn) {
+    // Only add if the button is in "Add" mode (qty === 0)
+    const productId = parseInt(detailAddBtn.dataset.productId);
+    if (!productId) return;
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    const units = getProductUnits(product);
+    const idx = selectedUnitIndex;
+    const unit = units[idx] || units[0] || product.unit || 'unit';
+    const cartKey = `${productId}_${unit}`;
+    const cartItem = cart[cartKey];
+    const qty = cartItem ? cartItem.qty : 0;
+    if (qty === 0) {
       adjustQuantity(productId, 1, unit, idx);
     }
   }
@@ -2222,6 +2276,7 @@ function openAddressFlowForLogin() {
     const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
     if (sendSummaryBtn) {
       sendSummaryBtn.textContent = '💾 Save Profile';
+      sendSummaryBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
       sendSummaryBtn.onclick = () => {
         saveCustomerData();
         closeAddressFlow();
@@ -2234,6 +2289,7 @@ function openAddressFlowForLogin() {
     const finalSendBtn = document.getElementById('sendWhatsAppFinalBtn');
     if (finalSendBtn) {
       finalSendBtn.textContent = '💾 Save Profile';
+      finalSendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
       finalSendBtn.onclick = () => {
         const house = document.getElementById('addrHouse')?.value.trim() || '';
         const area = document.getElementById('addrArea')?.value.trim() || '';
@@ -2641,7 +2697,6 @@ function initAddressFlow() {
     // Update button text based on mode
     function updateSummaryButtonText() {
       if (sendSummaryBtn) {
-        sendSummaryBtn.textContent = isLoginMode ? '💾 Save Profile' : '📦 Confirm Order';
         sendSummaryBtn.innerHTML = isLoginMode ? '<i class="fas fa-save"></i> Save Profile' : '<i class="fas fa-check"></i> Confirm Order';
       }
     }
@@ -2754,13 +2809,15 @@ document.addEventListener('DOMContentLoaded', () => {
   detailDescription = document.getElementById('detailDescription');
   detailAddBtn = document.getElementById('detailAddBtn');
 
+  // Add click listener for detail add button (using event delegation)
+  detailAddBtn.addEventListener('click', handleDetailAddClick);
+
   document.getElementById('closeProductDetail').addEventListener('click', closeProductDetail);
   productDetailModal.addEventListener('click', (e) => {
     if (e.target === productDetailModal || e.target.classList.contains('product-detail-overlay')) {
       closeProductDetail();
     }
   });
-  detailAddBtn.addEventListener('click', addProductFromDetail);
 
   // Initialize location warning with max distance
   const warningEl = document.getElementById('locationWarning');
