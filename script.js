@@ -6,8 +6,13 @@ let MAX_DISTANCE_KM = 5;
 let FREE_DELIVERY_THRESHOLD = 200;
 let MAX_QTY_PER_PRODUCT = 4;
 let ECO_BOX_CHARGE = 10;
-let DELIVERY_CHARGE = 30;
+let DELIVERY_CHARGE = 10;           // per‑km rate (used for distances > 1.5 km)
 let OPENING_HOURS = [];
+
+// Delivery charge rules – can be overridden from sheet as well
+const DELIVERY_MIN_DISTANCE = 1.5;   // km
+const DELIVERY_MIN_CHARGE = 15;      // fixed charge for distances <= 1.5 km
+const DELIVERY_MAX_CHARGE = 45;      // absolute cap
 
 const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
@@ -32,7 +37,9 @@ let stickyDetailedOpen = false;
 
 let customerData = {
   name: '', phone: '', location: { lat: null, lng: null, address: '' },
-  house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false
+  house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false,
+  preOrderDateTime: null,
+  roadDistance: null // cached road distance from store to this location
 };
 let map, marker, circle, currentLocationValid = false;
 let addressFlowModal, currentStep = 1;
@@ -41,8 +48,23 @@ let currentOffer = null;
 let offerTimerInterval = null;
 let homeTimerInterval = null;
 
+// Pre‑order on cart
+let cartPreOrderDateTime = null;
+function getCartPreOrder() {
+  try { return localStorage.getItem('freshAdat_cartPreOrder') || null; } catch { return null; }
+}
+function setCartPreOrder(dt) {
+  if (dt) {
+    localStorage.setItem('freshAdat_cartPreOrder', dt);
+  } else {
+    localStorage.removeItem('freshAdat_cartPreOrder');
+  }
+  cartPreOrderDateTime = dt;
+}
+cartPreOrderDateTime = getCartPreOrder();
+
 // Product detail modal
-let productDetailModal, slideshowImages, slideshowDots, detailName, detailUnitDisplay, detailUnitWrapper, detailUnitSelector, unitOptions, detailPrice, detailHighlights, highlightsList, detailDescription, detailAddBtn, detailSelectedPrice;
+let productDetailModal, slideshowImages, slideshowDots, detailName, detailUnitDisplay, detailUnitWrapper, detailUnitSelector, unitOptions, detailPrice, detailHighlights, highlightsList, detailDescription, detailAddBtn;
 let slideshowIndex = 0;
 let slideshowImagesArray = [];
 let currentProductUnits = [];
@@ -283,7 +305,7 @@ function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex) {
   renderProducts();
   if (cartPanel && cartPanel.classList.contains('open')) renderCart();
   updateStickyCartBar();
-  updateDetailAddButton(); // update the detail modal button if open
+  updateDetailAddButton();
   if (delta > 0 && newQty <= MAX_QTY_PER_PRODUCT) showToast('Added to cart');
   else if (delta < 0) showToast('Removed');
 
@@ -304,7 +326,7 @@ function isCutVegetable(category) {
 
 function escapeHtml(str) {
   if (!str) return '';
-  return str.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'));
+  return str.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : m === '>' ? '&gt;' : ''));
 }
 
 function getHomeOrderNumber(showOnHomeValue) {
@@ -343,7 +365,6 @@ function openProductDetail(productId) {
   const modal = document.getElementById('productDetailModal');
   if (!modal) return;
 
-  // Basic info
   detailName.textContent = product.name;
   const units = getProductUnits(product);
   const prices = product.prices || [];
@@ -353,11 +374,9 @@ function openProductDetail(productId) {
   currentProductDiscountPrices = discountPrices;
   selectedUnitIndex = 0;
 
-  // Unit display
   detailUnitDisplay.textContent = units[0] || product.unit || 'unit';
   detailUnitDisplay.className = 'product-detail-unit highlight-unit';
 
-  // Unit selector
   if (units.length > 1) {
     detailUnitSelector.style.display = 'block';
     unitOptions.innerHTML = units.map((u, idx) => {
@@ -373,33 +392,15 @@ function openProductDetail(productId) {
         unitOptions.querySelectorAll('.unit-option').forEach(b => b.classList.remove('active'));
         this.classList.add('active');
         updateDetailPriceAndSelection(product, idx);
-        updateDetailAddButton(); // update button for new unit
+        updateDetailAddButton();
       });
     });
     updateDetailPriceAndSelection(product, 0);
   } else {
     detailUnitSelector.style.display = 'none';
-    const price = getEffectivePrice(product, 0);
-    const originalPrice = getProductPrice(product, 0);
-    let priceHtml = '';
-    if (originalPrice > price) {
-      priceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
-    } else {
-      priceHtml = `<span class="single-price">₹${price}</span>`;
-    }
-    if (detailPrice) detailPrice.innerHTML = priceHtml;
-    if (detailSelectedPrice) {
-      let selPriceHtml = '';
-      if (originalPrice > price) {
-        selPriceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
-      } else {
-        selPriceHtml = `<span class="single-price">₹${price}</span>`;
-      }
-      detailSelectedPrice.innerHTML = selPriceHtml;
-    }
+    updateDetailPriceAndSelection(product, 0);
   }
 
-  // Highlights
   const highlightsContainer = detailHighlights;
   const highlightsListEl = highlightsList;
   if (product.highlight && typeof product.highlight === 'string') {
@@ -414,10 +415,8 @@ function openProductDetail(productId) {
     highlightsContainer.style.display = 'none';
   }
 
-  // Description
   detailDescription.textContent = product.description || 'Fresh and high quality produce.';
 
-  // Images
   const mainImg = getProductImageUrl(product);
   let extraImages = [];
   if (product.othr_img && typeof product.othr_img === 'string') {
@@ -438,14 +437,13 @@ function openProductDetail(productId) {
   renderSlideshow();
 
   detailAddBtn.dataset.productId = product.id;
-  updateDetailAddButton(); // set initial state
+  updateDetailAddButton();
 
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 
 function updateDetailPriceAndSelection(product, unitIndex) {
-  if (!detailPrice && !detailSelectedPrice) return;
   const price = getEffectivePrice(product, unitIndex);
   const originalPrice = getProductPrice(product, unitIndex);
   let priceHtml = '';
@@ -455,26 +453,17 @@ function updateDetailPriceAndSelection(product, unitIndex) {
     priceHtml = `<span class="single-price">₹${price}</span>`;
   }
   if (detailPrice) detailPrice.innerHTML = priceHtml;
-  
-  let selectedPriceHtml = '';
-  if (originalPrice > price) {
-    selectedPriceHtml = `<span class="original-price">₹${originalPrice}</span> <span class="discount-price">₹${price}</span>`;
-  } else {
-    selectedPriceHtml = `<span class="single-price">₹${price}</span>`;
-  }
-  if (detailSelectedPrice) detailSelectedPrice.innerHTML = selectedPriceHtml;
 }
 
-// ===== UPDATE DETAIL ADD BUTTON WITH QUANTITY CONTROLS =====
 function updateDetailAddButton() {
   const productId = parseInt(detailAddBtn.dataset.productId);
   if (!productId) {
-    detailAddBtn.innerHTML = `<span class="add-text">Add to Cart</span>`;
+    detailAddBtn.innerHTML = `<span class="add-text"><i class="fas fa-plus"></i> Add to Cart</span>`;
     return;
   }
   const product = products.find(p => p.id === productId);
   if (!product) {
-    detailAddBtn.innerHTML = `<span class="add-text">Add to Cart</span>`;
+    detailAddBtn.innerHTML = `<span class="add-text"><i class="fas fa-plus"></i> Add to Cart</span>`;
     return;
   }
   const units = getProductUnits(product);
@@ -491,7 +480,7 @@ function updateDetailAddButton() {
       <button class="qty-btn plus" data-id="${productId}" data-unit="${unit}" data-delta="1">+</button>
     `;
   } else {
-    detailAddBtn.innerHTML = `<span class="add-text">Add to Cart</span>`;
+    detailAddBtn.innerHTML = `<span class="add-text"><i class="fas fa-plus"></i> Add to Cart</span>`;
   }
 }
 
@@ -568,7 +557,6 @@ function closeProductDetail() {
   }
 }
 
-// This function handles clicks on the detail add button container
 function handleDetailAddClick(e) {
   const target = e.target;
   const btn = target.closest('.qty-btn');
@@ -585,9 +573,7 @@ function handleDetailAddClick(e) {
     }
     return;
   }
-  // If not a qty button, check if it's the "Add to Cart" text (click on container)
   if (target.closest('.add-text') || target === detailAddBtn) {
-    // Only add if the button is in "Add" mode (qty === 0)
     const productId = parseInt(detailAddBtn.dataset.productId);
     if (!productId) return;
     const product = products.find(p => p.id === productId);
@@ -1410,14 +1396,23 @@ function initSearchListeners() {
 // ========== CART RENDERING ==========
 function renderCart() {
   const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+  const cartPreOrderContainer = document.getElementById('cartPreOrderContainer');
+
   if (!keys.length) {
     cartItems.innerHTML = `<div class="cart-empty"><i class="fas fa-shopping-cart"></i><p>Cart empty</p></div>`;
     cartFooter.style.display = 'none';
+    if (cartPreOrderContainer) {
+      cartPreOrderContainer.innerHTML = '';
+      cartPreOrderContainer.style.display = 'none';
+    }
     updateStickyCartBar();
     return;
   }
+
   let total = 0, count = 0, totalSaved = 0;
   let cartHtml = '';
+  let hasMeat = false;
+
   keys.forEach(key => {
     const [productId, unit] = key.split('_');
     const p = products.find(x => x.id == parseInt(productId));
@@ -1432,6 +1427,8 @@ function renderCart() {
     count += qty;
     totalSaved += saved;
     const imgSrc = getProductImageUrl(p);
+    if (isMeatProduct(p)) hasMeat = true;
+
     cartHtml += `<div class="cart-item">
       <div class="cart-item-emoji"><img src="${imgSrc}" alt="${p.name}"></div>
       <div class="cart-item-info">
@@ -1451,18 +1448,148 @@ function renderCart() {
       </div>
     </div>`;
   });
+
   cartItems.innerHTML = cartHtml;
-  footerItems.textContent = count;
-  footerTotal.textContent = '₹' + total;
-  const existingSavedRow = document.querySelector('.cart-total-saved');
-  if (existingSavedRow) existingSavedRow.remove();
-  if (totalSaved > 0) {
-    const savedRow = document.createElement('div');
-    savedRow.className = 'cart-total-saved';
-    savedRow.innerHTML = `<span><i class="fas fa-tags"></i> Total Savings</span><span>₹${totalSaved}</span>`;
-    cartFooter.insertBefore(savedRow, cartFooter.querySelector('.order-btn'));
+
+  // ---- Delivery Option Section (only if meat is in cart) ----
+  if (hasMeat) {
+    const currentPreOrder = cartPreOrderDateTime;
+    const isScheduled = !!currentPreOrder;
+
+    let preOrderHtml = `
+      <div class="delivery-option-section">
+        <div class="delivery-option-header">
+          <i class="fas fa-truck"></i>
+          <span>Delivery Option</span>
+          <small>Choose only if you need delivery on a specific date</small>
+        </div>
+        <div class="delivery-option-choices">
+          <label class="delivery-option-radio ${!isScheduled ? 'active' : ''}">
+            <input type="radio" name="deliveryType" value="today" ${!isScheduled ? 'checked' : ''}>
+            <span class="radio-label">
+              <strong>Today Delivery</strong>
+              <span class="radio-sub">As soon as possible</span>
+            </span>
+          </label>
+          <label class="delivery-option-radio ${isScheduled ? 'active' : ''}">
+            <input type="radio" name="deliveryType" value="schedule" ${isScheduled ? 'checked' : ''}>
+            <span class="radio-label">
+              <strong>Schedule for Later</strong>
+              <span class="radio-sub">Pre-order</span>
+            </span>
+          </label>
+        </div>
+        <div class="delivery-schedule-body" id="deliveryScheduleBody" style="display: ${isScheduled ? 'block' : 'none'};">
+          <div class="schedule-datetime">
+            <input type="datetime-local" id="cartPreOrderInput" min="">
+            <button class="schedule-set-btn" id="cartPreOrderSetBtn">Set</button>
+          </div>
+          ${isScheduled ? `<div class="schedule-confirmed">✅ Scheduled for: ${new Date(currentPreOrder).toLocaleString()}</div>` : ''}
+          <small>Don't worry! You can choose a specific delivery date & time only if needed.</small>
+        </div>
+      </div>
+    `;
+
+    cartPreOrderContainer.innerHTML = preOrderHtml;
+    cartPreOrderContainer.style.display = 'block';
+
+    // ---- Event listeners ----
+    const radios = document.querySelectorAll('input[name="deliveryType"]');
+    const scheduleBody = document.getElementById('deliveryScheduleBody');
+    const input = document.getElementById('cartPreOrderInput');
+    const setBtn = document.getElementById('cartPreOrderSetBtn');
+
+    if (input) {
+      const now = new Date();
+      now.setHours(now.getHours() + 1);
+      input.min = now.toISOString().slice(0, 16);
+      if (!input.value && !isScheduled) {
+        input.value = now.toISOString().slice(0, 16);
+      }
+    }
+
+    radios.forEach(radio => {
+      radio.addEventListener('change', function() {
+        const isSchedule = this.value === 'schedule';
+        document.querySelectorAll('.delivery-option-radio').forEach(lbl => {
+          lbl.classList.toggle('active', lbl.querySelector('input').checked);
+        });
+        if (scheduleBody) {
+          scheduleBody.style.display = isSchedule ? 'block' : 'none';
+        }
+        if (!isSchedule) {
+          setCartPreOrder(null);
+          showToast('📦 Delivery set to today');
+          renderCart();
+        }
+      });
+    });
+
+    if (setBtn && input) {
+      setBtn.addEventListener('click', function() {
+        const dt = input.value;
+        if (!dt) {
+          showToast('Please select a date and time.');
+          return;
+        }
+        const selected = new Date(dt);
+        const now = new Date();
+        if (selected.getTime() < now.getTime() + 3600000) {
+          showToast('Please choose a time at least 1 hour from now.');
+          return;
+        }
+        setCartPreOrder(dt);
+        showToast('✅ Pre‑order time set!');
+        renderCart();
+      });
+    }
+
+  } else {
+    cartPreOrderContainer.innerHTML = '';
+    cartPreOrderContainer.style.display = 'none';
   }
-  cartFooter.style.display = 'block';
+
+  // ---- Footer ----
+  // Use road distance via getDistanceFromStore (async, but we need it for display)
+  // We'll fetch it if not yet cached; for quick rendering we use straight-line fallback
+  // but we'll update after fetch.
+  const subtotal = total;
+  // Try to get cached road distance, if not, use straight-line
+  let distance = customerData.roadDistance;
+  if (distance === null || distance === undefined) {
+    // fallback to straight-line for immediate display
+    if (customerData.location && customerData.location.lat) {
+      distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
+    } else {
+      distance = null;
+    }
+  }
+  const deliveryCharge = getDeliveryCharge(subtotal, distance);
+  const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
+  const grandTotal = subtotal + deliveryCharge + ecoCharge;
+
+  footerItems.textContent = count;
+  let footerHtml = `
+    <div class="cart-total"><span>Items (${count})</span><span>₹${subtotal}</span></div>
+    <div class="cart-total"><span>Delivery</span><span>${deliveryCharge === 0 ? 'Free' : '₹' + deliveryCharge}</span></div>
+    ${customerData.useEcoBox ? `<div class="cart-total"><span>Eco-box</span><span>₹${ECO_BOX_CHARGE}</span></div>` : ''}
+    <div class="cart-total grand"><span>Total</span><span>₹${grandTotal}</span></div>
+  `;
+  if (cartPreOrderDateTime) {
+    footerHtml += `<div class="cart-preorder-footer">📅 Scheduled: ${new Date(cartPreOrderDateTime).toLocaleString()}</div>`;
+  }
+  if (totalSaved > 0) {
+    footerHtml += `<div class="cart-total-saved">You saved: ₹${totalSaved}</div>`;
+  }
+  footerHtml += `<div class="cart-eco-message">✅ Delivered in reusable eco‑box  |  ♻️ Please return the empty box</div>`;
+
+  const footerContainer = document.getElementById('cartFooter');
+  const orderBtn = footerContainer.querySelector('.order-btn');
+  footerContainer.innerHTML = footerHtml;
+  footerContainer.appendChild(orderBtn);
+  footerContainer.style.display = 'block';
+
+  // ---- Attach cart item controls ----
   document.querySelectorAll('.cqty-btn').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
@@ -1478,6 +1605,7 @@ function renderCart() {
       }
     });
   });
+
   document.querySelectorAll('.remove-btn').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
@@ -1492,6 +1620,7 @@ function renderCart() {
       showToast('Removed');
     });
   });
+
   updateStickyCartBar();
 }
 
@@ -1582,17 +1711,26 @@ function renderStickyDetailedList() {
 
 function updateStickyCartBar() {
   if (isCartPanelOpen()) {
-    if (stickyBar) stickyBar.style.display = 'none';
+    if (stickyBar) {
+      stickyBar.style.display = 'none';
+      stickyBar.style.zIndex = 100;
+    }
     return;
   }
   const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
   const itemCount = keys.reduce((sum, k) => sum + cart[k].qty, 0);
   if (itemCount === 0) {
-    if (stickyBar) stickyBar.style.display = 'none';
+    if (stickyBar) {
+      stickyBar.style.display = 'none';
+      stickyBar.style.zIndex = 1000;
+    }
     document.body.classList.remove('cart-not-empty');
   } else {
     document.body.classList.add('cart-not-empty');
-    if (stickyBar) stickyBar.style.display = 'block';
+    if (stickyBar) {
+      stickyBar.style.display = 'block';
+      stickyBar.style.zIndex = 1000;
+    }
   }
   
   if (itemCount === 0) return;
@@ -1615,7 +1753,10 @@ function updateStickyCartBar() {
   if (stickySavingsSpan) stickySavingsSpan.textContent = `Saved: ₹${totalSaved}`;
   if (stickyFreeBadge) stickyFreeBadge.style.display = freeDelivery ? 'inline-block' : 'none';
   if (stickyDetailedOpen) renderStickyDetailedList();
-  if (stickyBar) stickyBar.style.display = 'block';
+  if (stickyBar) {
+    stickyBar.style.display = 'block';
+    stickyBar.style.zIndex = 1000;
+  }
 }
 
 function openCart() {
@@ -1623,19 +1764,63 @@ function openCart() {
   cartOverlay.classList.add('open');
   cartPanel.classList.add('open');
   renderCart();
-  if (stickyBar) stickyBar.style.display = 'none';
+  if (stickyBar) {
+    stickyBar.style.display = 'none';
+    stickyBar.style.zIndex = 100;
+  }
 }
 
 function closeCart() {
   cartOverlay.classList.remove('open');
   cartPanel.classList.remove('open');
-  const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
-  if (keys.length > 0 && stickyBar) {
-    stickyBar.style.display = 'block';
-    updateStickyCartBar();
-  } else if (stickyBar) {
-    stickyBar.style.display = 'none';
+  if (stickyBar) {
+    stickyBar.style.zIndex = 1000;
+    const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+    if (keys.length > 0) {
+      stickyBar.style.display = 'block';
+      updateStickyCartBar();
+    } else {
+      stickyBar.style.display = 'none';
+    }
   }
+}
+
+// ========== ROAD DISTANCE (OSRM) ==========
+async function getDistanceFromStore() {
+  if (!customerData.location || !customerData.location.lat || !customerData.location.lng) return null;
+  if (customerData.roadDistance !== null && customerData.roadDistance !== undefined) {
+    return customerData.roadDistance;
+  }
+  const from = `${ADAT_LON},${ADAT_LAT}`;
+  const to = `${customerData.location.lng},${customerData.location.lat}`;
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=false`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data.routes && data.routes.length > 0) {
+      const distanceKm = data.routes[0].distance / 1000;
+      customerData.roadDistance = distanceKm;
+      return distanceKm;
+    } else {
+      const straight = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
+      customerData.roadDistance = straight;
+      return straight;
+    }
+  } catch (err) {
+    const straight = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
+    customerData.roadDistance = straight;
+    return straight;
+  }
+}
+
+function getDeliveryCharge(subtotal, distance) {
+  if (subtotal >= FREE_DELIVERY_THRESHOLD) return 0;
+  if (!distance || distance <= 0) return 0;
+  if (distance <= DELIVERY_MIN_DISTANCE) {
+    return DELIVERY_MIN_CHARGE;
+  }
+  let charge = Math.round(distance * DELIVERY_CHARGE);
+  return Math.min(charge, DELIVERY_MAX_CHARGE);
 }
 
 // ========== ADDRESS FLOW ==========
@@ -1660,11 +1845,6 @@ function getCartTotalSavings() {
     savings += (originalPrice - price) * item.qty;
   });
   return savings;
-}
-
-function getDeliveryCharge(subtotal) {
-  if (subtotal >= FREE_DELIVERY_THRESHOLD) return 0;
-  return DELIVERY_CHARGE;
 }
 
 function scrollToConfirmButton() {
@@ -1695,20 +1875,25 @@ function initMap(initialLat = null, initialLng = null) {
 function createMap(initialLat = null, initialLng = null) {
   const centerLat = (initialLat && initialLng) ? initialLat : ADAT_LAT;
   const centerLng = (initialLat && initialLng) ? initialLng : ADAT_LON;
+
   map = L.map('locationMap').setView([centerLat, centerLng], 14);
+
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CartoDB'
   }).addTo(map);
+
   const adatCenter = [ADAT_LAT, ADAT_LON];
   circle = L.circle(adatCenter, {
     color: '#f47c2b',
     weight: 2,
     fillColor: '#f47c2b',
-    fillOpacity: 0.1,
+    fillOpacity: 0.08,
     radius: MAX_DISTANCE_KM * 1000
   }).addTo(map);
+
   marker = L.marker([centerLat, centerLng], { draggable: true }).addTo(map);
-  marker.on('dragend', async function(e) {
+
+  marker.on('dragend', async function () {
     const pos = marker.getLatLng();
     const distance = getDistanceKm(ADAT_LAT, ADAT_LON, pos.lat, pos.lng);
     if (distance <= MAX_DISTANCE_KM) {
@@ -1721,13 +1906,18 @@ function createMap(initialLat = null, initialLng = null) {
         const displayDiv = document.getElementById('selectedLocationDisplay');
         if (displayDiv) displayDiv.innerHTML = `<strong>Selected location:</strong> ${address}`;
         customerData.location = { lat: pos.lat, lng: pos.lng, address: address };
+        customerData.roadDistance = null;
+        // Pre-fetch road distance
+        getDistanceFromStore().then(roadDist => { /* cached */ });
         const confirmBtn = document.getElementById('confirmLocationBtn');
         if (confirmBtn) confirmBtn.disabled = false;
         scrollToConfirmButton();
       } catch (err) {
+        const fallback = `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
         const displayDiv = document.getElementById('selectedLocationDisplay');
-        if (displayDiv) displayDiv.innerHTML = `<strong>Selected location:</strong> ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
-        customerData.location = { lat: pos.lat, lng: pos.lng, address: `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}` };
+        if (displayDiv) displayDiv.innerHTML = `<strong>Selected location:</strong> ${fallback}`;
+        customerData.location = { lat: pos.lat, lng: pos.lng, address: fallback };
+        customerData.roadDistance = null;
         const confirmBtn = document.getElementById('confirmLocationBtn');
         if (confirmBtn) confirmBtn.disabled = false;
         scrollToConfirmButton();
@@ -1735,13 +1925,39 @@ function createMap(initialLat = null, initialLng = null) {
     } else {
       currentLocationValid = false;
       updateLocationWarning(false);
-      showToast("❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.");
+      showToast('❌ Outside delivery area (beyond 5 km). Drag the marker inside the circle.');
       const displayDiv = document.getElementById('selectedLocationDisplay');
       if (displayDiv) displayDiv.innerHTML = '';
       const confirmBtn = document.getElementById('confirmLocationBtn');
       if (confirmBtn) confirmBtn.disabled = true;
     }
   });
+
+  // Major place labels (unchanged)
+  const majorPlaces = [
+    { name: 'Adat Centre', lat: 10.5578, lng: 76.1572 },
+    { name: 'Sobha City Junction', lat: 10.5457, lng: 76.1795 },
+    { name: 'Amala Hospital', lat: 10.5629, lng: 76.1689 },
+    { name: 'Puranattukara', lat: 10.5534, lng: 76.1552 },
+    { name: 'Nithya Sahaya Matha Church', lat: 10.5457, lng: 76.1498 },
+    { name: 'St. Joseph Church Amala', lat: 10.5633, lng: 76.1648 },
+    { name: 'St. Rita\'s Church Chittilapilly', lat: 10.5601, lng: 76.1408 }
+  ];
+  const majorGroup = L.featureGroup();
+  majorPlaces.forEach(place => {
+    const icon = L.divIcon({
+      className: 'major-place-label',
+      html: `<div class="major-text">${place.name}</div>`,
+      iconSize: [100, 24],
+      iconAnchor: [50, 12]
+    });
+    L.marker([place.lat, place.lng], { icon })
+      .addTo(majorGroup)
+      .bindPopup(`<b>${place.name}</b>`);
+  });
+  majorGroup.addTo(map);
+
+  map.setView(adatCenter, 14);
   if (initialLat && initialLng) {
     marker.fire('dragend');
   } else {
@@ -1817,7 +2033,7 @@ function useCurrentLocation() {
   }
 }
 
-function showStep(step) {
+async function showStep(step) {
   document.querySelectorAll('.step-content').forEach(el => el.style.display = 'none');
   const stepContent = document.getElementById(`step${step}Content`);
   if (stepContent) stepContent.style.display = 'block';
@@ -1833,7 +2049,8 @@ function showStep(step) {
     const confirmCustomer = document.getElementById('confirmCustomer');
     if (confirmCustomer) confirmCustomer.innerHTML = `${customerData.name}<br>📞 ${customerData.phone}`;
     let subtotal = getCartSubtotal();
-    let deliveryCharge = getDeliveryCharge(subtotal);
+    const distance = await getDistanceFromStore();
+    let deliveryCharge = getDeliveryCharge(subtotal, distance);
     let ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
     let total = subtotal + deliveryCharge + ecoCharge;
     let summaryHtml = '';
@@ -1850,7 +2067,15 @@ function showStep(step) {
     const ecoLine = document.getElementById('ecoBoxChargeLine');
     if (ecoLine) ecoLine.style.display = customerData.useEcoBox ? 'block' : 'none';
     const finalTotal = document.getElementById('confirmFinalTotal');
-    if (finalTotal) finalTotal.innerHTML = `Total: ₹${total}`;
+    if (finalTotal) {
+      let totalText = `Total: ₹${total}`;
+      if (deliveryCharge > 0) {
+        totalText += ` (incl. delivery ₹${deliveryCharge})`;
+      } else if (deliveryCharge === 0 && subtotal < FREE_DELIVERY_THRESHOLD) {
+        totalText += ` (free delivery)`;
+      }
+      finalTotal.innerHTML = totalText;
+    }
   }
 }
 
@@ -1868,6 +2093,8 @@ function loadSavedCustomerData() {
         customerData.addressType = data.addressType || 'Home';
         customerData.location = data.location;
         customerData.useEcoBox = data.useEcoBox || false;
+        customerData.preOrderDateTime = data.preOrderDateTime || null;
+        customerData.roadDistance = data.roadDistance || null;
       }
     } catch(e) {}
   }
@@ -1882,12 +2109,14 @@ function saveCustomerData() {
     landmark: customerData.landmark,
     addressType: customerData.addressType,
     location: customerData.location,
-    useEcoBox: customerData.useEcoBox
+    useEcoBox: customerData.useEcoBox,
+    preOrderDateTime: customerData.preOrderDateTime,
+    roadDistance: customerData.roadDistance
   };
   localStorage.setItem('freshAdat_customer', JSON.stringify(toSave));
 }
 
-function showSavedSummary() {
+async function showSavedSummary() {
   const stepIndicator = document.getElementById('stepIndicator');
   const multiStep = document.getElementById('multiStepContent');
   const savedCard = document.getElementById('savedSummaryCard');
@@ -1900,7 +2129,8 @@ function showSavedSummary() {
 
   const subtotal = getCartSubtotal();
   const totalSavings = getCartTotalSavings();
-  const deliveryCharge = getDeliveryCharge(subtotal);
+  const distance = await getDistanceFromStore();
+  const deliveryCharge = getDeliveryCharge(subtotal, distance);
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + deliveryCharge + ecoCharge;
 
@@ -1914,12 +2144,19 @@ function showSavedSummary() {
     itemsHtml += `<div class="order-summary-item">${p.name} (${unit}) ×${item.qty} = ₹${price * item.qty}</div>`;
   });
 
+  let preOrderHtml = '';
+  if (customerData.preOrderDateTime) {
+    const dateObj = new Date(customerData.preOrderDateTime);
+    preOrderHtml = `<div><strong>📅 Scheduled Delivery:</strong> ${dateObj.toLocaleString()}</div>`;
+  }
+
   const summaryHtml = `
     <div class="saved-address-section">
       <h4><i class="fas fa-map-marker-alt"></i> Delivery Address</h4>
       <p><strong>📍 Address:</strong> ${escapeHtml(fullAddr)}</p>
       <p><strong>🏷️ Type:</strong> ${customerData.addressType}</p>
       <p><strong>🗺️ <a href="${mapLink}" target="_blank">View on Google Maps</a></strong></p>
+      ${preOrderHtml}
     </div>
     <div class="saved-customer-section">
       <h4><i class="fas fa-user"></i> Customer Details</h4>
@@ -1932,7 +2169,7 @@ function showSavedSummary() {
       <div class="order-totals">
         <div>Subtotal: ₹${subtotal}</div>
         ${totalSavings > 0 ? `<div>Savings: -₹${totalSavings}</div>` : ''}
-        ${deliveryCharge > 0 ? `<div>Delivery Charge: ₹${deliveryCharge}</div>` : ''}
+        <div>Delivery: ${deliveryCharge > 0 ? '₹' + deliveryCharge : 'Free'}</div>
         ${customerData.useEcoBox ? `<div>Eco-box: +₹${ECO_BOX_CHARGE}</div>` : ''}
         <div class="total"><strong>Total: ₹${total}</strong></div>
       </div>
@@ -1980,9 +2217,9 @@ function startMultiStepFlow() {
 }
 
 function openAddressFlow() {
+  if (stickyBar) stickyBar.style.display = 'none';
   if (!isStoreOpen) {
-    showToast("❌ Store is currently closed. Please order during opening hours.");
-    return;
+    showToast("⚠️ Store is currently closed. You can pre‑order for later.");
   }
   isLoginMode = false;
   if (Object.keys(cart).length === 0) {
@@ -1991,6 +2228,12 @@ function openAddressFlow() {
   }
   closeCart();
   loadSavedCustomerData();
+
+  if (cartPreOrderDateTime && !customerData.preOrderDateTime) {
+    customerData.preOrderDateTime = cartPreOrderDateTime;
+    saveCustomerData();
+  }
+
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'flex';
   const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location && customerData.location.lat;
@@ -2014,6 +2257,15 @@ function closeAddressFlow() {
   if (modal) modal.style.display = 'none';
   hideLoadingOverlay();
   updateLocationWarning(true);
+  if (stickyBar) {
+    const keys = Object.keys(cart).filter(k => cart[k].qty > 0);
+    if (keys.length > 0) {
+      stickyBar.style.display = 'block';
+      updateStickyCartBar();
+    } else {
+      stickyBar.style.display = 'none';
+    }
+  }
 }
 
 function handleBack() {
@@ -2030,6 +2282,12 @@ function handleBack() {
 }
 
 function sendOrderFromSummary() {
+  const isOpen = isStoreOpenNow();
+  if (!isOpen && !customerData.preOrderDateTime) {
+    showToast('❌ Store is closed now. Please select a future delivery time (pre‑order).');
+    showStep(3);
+    return;
+  }
   const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
   if (distance > MAX_DISTANCE_KM) {
     showToast("❌ Delivery address is outside our 5 km area. Please update location.");
@@ -2040,27 +2298,75 @@ function sendOrderFromSummary() {
   sendFinalWhatsApp();
 }
 
-function sendFinalWhatsApp() {
+// ========== MEAT SEPARATION ==========
+function isMeatProduct(product) {
+  if (!product) return false;
+  const cat = (product.category || '').toLowerCase();
+  const name = (product.name || '').toLowerCase();
+  return cat.includes('meat') || 
+         cat.includes('chicken') ||
+         cat.includes('mutton') ||
+         cat.includes('fish') ||
+         cat.includes('pork') ||
+         name.includes('chicken') ||
+         name.includes('mutton') ||
+         name.includes('fish') ||
+         name.includes('pork');
+}
+
+async function sendFinalWhatsApp() {
   const subtotal = getCartSubtotal();
-  const deliveryCharge = getDeliveryCharge(subtotal);
+  const distance = await getDistanceFromStore();
+  const deliveryCharge = getDeliveryCharge(subtotal, distance);
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + deliveryCharge + ecoCharge;
   const fullAddress = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
   const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
 
-  let itemsList = '';
+  let itemLines = [];
+  let hasMeat = false;
+
   Object.keys(cart).forEach(key => {
     const [productId, unit] = key.split('_');
     const p = products.find(x => x.id == parseInt(productId));
     if (!p) return;
     const item = cart[key];
     const price = item.price || 0;
-    itemsList += `  🛒 ${p.name} (${unit}) x ${item.qty} = ₹${price * item.qty}\n`;
+    const qty = item.qty;
+    const line = `🛒 ${p.name} (${unit}) × ${qty} = ₹${price * qty}`;
+    itemLines.push(line);
+    if (isMeatProduct(p)) hasMeat = true;
   });
-  const ecoLine = customerData.useEcoBox ? `♻️ Eco-box charge: ₹${ECO_BOX_CHARGE}\n` : '';
-  const deliveryLine = deliveryCharge > 0 ? `🚚 Delivery charge: ₹${deliveryCharge}\n` : '';
+
   const orderId = 'ORD' + Date.now().toString().slice(-6);
-  const msg = `🌿 *FRESH ADAT ORDER* 🌿\n━━━━━━━━━━━━━━━━━━\n🆔 Order ID: ${orderId}\n👤 Customer: ${customerData.name}\n📞 Phone: ${customerData.phone}\n📍 Address: ${fullAddress}\n🏷️ Type: ${customerData.addressType}\n🗺️ Map: ${mapLink}\n\n🛍️ *Items:*\n${itemsList}${deliveryLine}${ecoLine}💰 Subtotal: ₹${subtotal}\n💵 Total: ₹${total}\n\n✅ Delivered in reusable eco‑box\n♻️ Please return the empty box after delivery\n📝 Note: Thank you for ordering with Fresh Adat!`;
+
+  let msg = `🌿 *FRESH ADAT ORDER* 🌿\n`;
+  msg += `━━━━━━━━━━━━━━━━━━\n`;
+  msg += `🆔 *Order ID:* ${orderId}\n`;
+  msg += `👤 *Customer:* ${customerData.name}\n`;
+  msg += `📞 *Phone:* ${customerData.phone}\n`;
+  msg += `📍 *Address:* ${fullAddress}\n`;
+  msg += `🏷️ *Type:* ${customerData.addressType}\n`;
+  msg += `🗺️ *Map:* ${mapLink}\n\n`;
+
+  msg += `🛍️ *Items:*\n`;
+  msg += itemLines.join('\n') + '\n\n';
+
+  msg += `🚚 *Delivery charge:* ₹${deliveryCharge}\n`;
+  msg += `💰 *Subtotal:* ₹${subtotal}\n`;
+  msg += `💵 *Total:* ₹${total}\n`;
+  msg += `━━━━━━━━━━━━━━━━━━\n`;
+
+  if (hasMeat) {
+    msg += `⚖️ *ശ്രദ്ധിക്കുക:*\n`;
+    msg += `മാംസ ഉൽപ്പന്നങ്ങളുടെ ഭാരം **കട്ട് ചെയ്യുന്നതിന് മുമ്പ് തൂക്കിയ ശേഷമാണ്** അന്തിമ വില നിശ്ചയിക്കുന്നത്.\n`;
+    msg += `തൂക്കത്തിന് ശേഷം **ശരിയായ ഭാരം, നിരക്ക്, അന്തിമ ബിൽ** പ്രത്യേകം അയയ്ക്കുന്നതാണ്.\n\n`;
+  }
+
+  msg += `✅ Delivered in reusable eco-box\n`;
+  msg += `♻️ Please return the empty box after delivery\n`;
+  msg += `📝 Note: Thank you for ordering with Fresh Adat!`;
+
   window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   cart = {};
   saveCart(cart);
@@ -2178,7 +2484,8 @@ function renderAccountModal() {
       localStorage.removeItem('freshAdat_customer');
       customerData = {
         name: '', phone: '', location: { lat: null, lng: null, address: '' },
-        house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false
+        house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false,
+        preOrderDateTime: null
       };
       renderAccountModal();
       showToast('👋 Logged out successfully');
@@ -2646,7 +2953,6 @@ function initAddressFlow() {
   if (finalSendBtn) {
     finalSendBtn.addEventListener('click', function() {
       if (isLoginMode) {
-        // Save profile mode
         const house = document.getElementById('addrHouse')?.value.trim() || '';
         const area = document.getElementById('addrArea')?.value.trim() || '';
         const landmark = document.getElementById('addrLandmark')?.value.trim() || '';
@@ -2672,7 +2978,6 @@ function initAddressFlow() {
         renderAccountModal();
         showToast('✅ Profile saved');
       } else {
-        // Order mode - send WhatsApp
         sendFinalWhatsApp();
       }
     });
@@ -2694,15 +2999,12 @@ function initAddressFlow() {
       }
     });
     
-    // Update button text based on mode
     function updateSummaryButtonText() {
       if (sendSummaryBtn) {
         sendSummaryBtn.innerHTML = isLoginMode ? '<i class="fas fa-save"></i> Save Profile' : '<i class="fas fa-check"></i> Confirm Order';
       }
     }
-    // Call initially
     setTimeout(updateSummaryButtonText, 100);
-    // Also call when mode changes (handled in openAddressFlowForLogin and openAddressFlow)
     const origOpenAddressFlow = openAddressFlow;
     openAddressFlow = function() {
       isLoginMode = false;
@@ -2793,7 +3095,6 @@ document.addEventListener('DOMContentLoaded', () => {
     visionModalElem.addEventListener('click', (e) => { if (e.target === visionModalElem) visionModalElem.classList.remove('open'); });
   }
 
-  // Product detail modal elements
   productDetailModal = document.getElementById('productDetailModal');
   slideshowImages = document.getElementById('slideshowImages');
   slideshowDots = document.getElementById('slideshowDots');
@@ -2803,13 +3104,11 @@ document.addEventListener('DOMContentLoaded', () => {
   detailUnitSelector = document.getElementById('detailUnitSelector');
   unitOptions = document.getElementById('unitOptions');
   detailPrice = document.getElementById('detailPrice');
-  detailSelectedPrice = document.getElementById('detailSelectedPrice');
   detailHighlights = document.getElementById('detailHighlights');
   highlightsList = document.getElementById('highlightsList');
   detailDescription = document.getElementById('detailDescription');
   detailAddBtn = document.getElementById('detailAddBtn');
 
-  // Add click listener for detail add button (using event delegation)
   detailAddBtn.addEventListener('click', handleDetailAddClick);
 
   document.getElementById('closeProductDetail').addEventListener('click', closeProductDetail);
@@ -2819,7 +3118,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Initialize location warning with max distance
   const warningEl = document.getElementById('locationWarning');
   if (warningEl) {
     const distSpan = document.getElementById('maxDistDisplay');
@@ -2840,7 +3138,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addOfferBtn) addOfferBtn.addEventListener('click', addOfferToCart);
   if (offerModal) offerModal.addEventListener('click', (e) => { if (e.target === offerModal) closeOfferModal(); });
 
-  // Bottom navigation
   const bottomNavBar = document.getElementById('bottomNavBar');
   let lastScrollTop = 0;
   let scrollTimeout;
