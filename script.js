@@ -39,7 +39,7 @@ let customerData = {
   name: '', phone: '', location: { lat: null, lng: null, address: '' },
   house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false,
   preOrderDateTime: null,
-  roadDistance: null // cached road distance from store to this location
+  roadDistance: null
 };
 let map, marker, circle, currentLocationValid = false;
 let addressFlowModal, currentStep = 1;
@@ -48,7 +48,6 @@ let currentOffer = null;
 let offerTimerInterval = null;
 let homeTimerInterval = null;
 
-// Pre‑order on cart
 let cartPreOrderDateTime = null;
 function getCartPreOrder() {
   try { return localStorage.getItem('freshAdat_cartPreOrder') || null; } catch { return null; }
@@ -71,6 +70,12 @@ let currentProductUnits = [];
 let currentProductPrices = [];
 let currentProductDiscountPrices = [];
 let selectedUnitIndex = 0;
+
+// Bottom nav and mobile search
+let bottomNavBar, mobileRow;
+let lastScrollTop = 0;
+let scrollTimeout;
+let searchWasOpenBeforeDetail = false; // remember if mobile search was open before opening product detail
 
 const FALLBACK_IMAGES = {
   slide1: 'https://via.placeholder.com/800x400?text=Slide+1',
@@ -365,6 +370,16 @@ function openProductDetail(productId) {
   const modal = document.getElementById('productDetailModal');
   if (!modal) return;
 
+  // Remember if mobile search is open and close it
+  if (mobileRow) {
+    searchWasOpenBeforeDetail = mobileRow.classList.contains('open');
+    if (searchWasOpenBeforeDetail) {
+      mobileRow.classList.remove('open');
+    }
+  }
+  // Hide bottom navigation
+  if (bottomNavBar) bottomNavBar.classList.remove('visible');
+
   detailName.textContent = product.name;
   const units = getProductUnits(product);
   const prices = product.prices || [];
@@ -441,6 +456,38 @@ function openProductDetail(productId) {
 
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+}
+
+function closeProductDetail() {
+  const modal = document.getElementById('productDetailModal');
+  if (modal) {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+  if (window._slideshowInterval) {
+    clearInterval(window._slideshowInterval);
+    window._slideshowInterval = null;
+  }
+
+  // Restore mobile search bar if it was open before
+  if (mobileRow && searchWasOpenBeforeDetail) {
+    mobileRow.classList.add('open');
+    searchWasOpenBeforeDetail = false;
+  }
+
+  // Restore bottom navigation visibility based on scroll/cart
+  if (bottomNavBar) {
+    if (!document.body.classList.contains('cart-not-empty')) {
+      // Use the same logic as handleBottomBar
+      if (window.scrollY === 0) {
+        bottomNavBar.classList.add('visible');
+      } else {
+        handleBottomBar();
+      }
+    } else {
+      bottomNavBar.classList.remove('visible');
+    }
+  }
 }
 
 function updateDetailPriceAndSelection(product, unitIndex) {
@@ -543,18 +590,6 @@ function goToSlide(index) {
 
   images.forEach((img, i) => img.classList.toggle('active', i === index));
   dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
-}
-
-function closeProductDetail() {
-  const modal = document.getElementById('productDetailModal');
-  if (modal) {
-    modal.style.display = 'none';
-    document.body.style.overflow = '';
-  }
-  if (window._slideshowInterval) {
-    clearInterval(window._slideshowInterval);
-    window._slideshowInterval = null;
-  }
 }
 
 function handleDetailAddClick(e) {
@@ -1550,14 +1585,9 @@ function renderCart() {
   }
 
   // ---- Footer ----
-  // Use road distance via getDistanceFromStore (async, but we need it for display)
-  // We'll fetch it if not yet cached; for quick rendering we use straight-line fallback
-  // but we'll update after fetch.
   const subtotal = total;
-  // Try to get cached road distance, if not, use straight-line
   let distance = customerData.roadDistance;
   if (distance === null || distance === undefined) {
-    // fallback to straight-line for immediate display
     if (customerData.location && customerData.location.lat) {
       distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
     } else {
@@ -1907,7 +1937,6 @@ function createMap(initialLat = null, initialLng = null) {
         if (displayDiv) displayDiv.innerHTML = `<strong>Selected location:</strong> ${address}`;
         customerData.location = { lat: pos.lat, lng: pos.lng, address: address };
         customerData.roadDistance = null;
-        // Pre-fetch road distance
         getDistanceFromStore().then(roadDist => { /* cached */ });
         const confirmBtn = document.getElementById('confirmLocationBtn');
         if (confirmBtn) confirmBtn.disabled = false;
@@ -2875,6 +2904,30 @@ function loadProductsAndOffers(baseUrl) {
   });
 }
 
+// ========== BOTTOM NAVIGATION HANDLING ==========
+function handleBottomBar() {
+  if (!bottomNavBar) return;
+  if (document.body.classList.contains('cart-not-empty')) {
+    bottomNavBar.classList.remove('visible');
+    return;
+  }
+  // Check if product detail modal is open – if so, hide bottom nav
+  const productModal = document.getElementById('productDetailModal');
+  if (productModal && productModal.style.display === 'flex') {
+    bottomNavBar.classList.remove('visible');
+    return;
+  }
+  const currentScroll = window.scrollY || document.documentElement.scrollTop;
+  if (currentScroll < lastScrollTop) {
+    bottomNavBar.classList.add('visible');
+  } else if (currentScroll > lastScrollTop) {
+    bottomNavBar.classList.remove('visible');
+  } else if (currentScroll === 0) {
+    bottomNavBar.classList.add('visible');
+  }
+  lastScrollTop = currentScroll <= 0 ? 0 : currentScroll;
+}
+
 // ========== BACK BUTTON HANDLING ==========
 function resetToHome() {
   closeCart();
@@ -3050,6 +3103,9 @@ document.addEventListener('DOMContentLoaded', () => {
   stickyToggleBtn = document.getElementById('stickyCartToggleBtn');
   stickyDetailedDiv = document.getElementById('stickyCartDetailed');
 
+  bottomNavBar = document.getElementById('bottomNavBar');
+  mobileRow = document.getElementById('mobileSearchRow');
+
   if (stickyCartBtn) stickyCartBtn.addEventListener('click', openCart);
   if (stickyToggleBtn) stickyToggleBtn.addEventListener('click', toggleStickyDetailed);
 
@@ -3062,7 +3118,6 @@ document.addEventListener('DOMContentLoaded', () => {
   categoriesModal.addEventListener('click', (e) => { if (e.target === categoriesModal) closeCategoriesModal(); });
 
   const mobileIcon = document.getElementById('mobileSearchIcon');
-  const mobileRow = document.getElementById('mobileSearchRow');
   const innerArrow = document.getElementById('mobileSearchInnerIcon');
   if (mobileIcon && mobileRow) {
     mobileIcon.addEventListener('click', () => mobileRow.classList.toggle('open'));
@@ -3138,30 +3193,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addOfferBtn) addOfferBtn.addEventListener('click', addOfferToCart);
   if (offerModal) offerModal.addEventListener('click', (e) => { if (e.target === offerModal) closeOfferModal(); });
 
-  const bottomNavBar = document.getElementById('bottomNavBar');
-  let lastScrollTop = 0;
-  let scrollTimeout;
-
-  function handleBottomBar() {
-    if (!bottomNavBar) return;
-    if (document.body.classList.contains('cart-not-empty')) {
-      bottomNavBar.classList.remove('visible');
-      return;
-    }
-    const currentScroll = window.scrollY || document.documentElement.scrollTop;
-    if (currentScroll < lastScrollTop) {
-      bottomNavBar.classList.add('visible');
-    } else if (currentScroll > lastScrollTop) {
-      bottomNavBar.classList.remove('visible');
-    } else if (currentScroll === 0) {
-      bottomNavBar.classList.add('visible');
-    }
-    lastScrollTop = currentScroll <= 0 ? 0 : currentScroll;
-  }
-
+  // Bottom navigation scroll handling
   setTimeout(() => {
     if (!document.body.classList.contains('cart-not-empty') && (window.scrollY || document.documentElement.scrollTop) === 0) {
-      bottomNavBar.classList.add('visible');
+      if (bottomNavBar) bottomNavBar.classList.add('visible');
     }
   }, 100);
 
@@ -3187,7 +3222,7 @@ document.addEventListener('DOMContentLoaded', () => {
           openAccountModal();
           break;
       }
-      bottomNavBar.classList.remove('visible');
+      if (bottomNavBar) bottomNavBar.classList.remove('visible');
     });
   });
 
