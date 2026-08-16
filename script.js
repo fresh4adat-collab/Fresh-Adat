@@ -2791,10 +2791,21 @@ function loadProductsAndOffers(baseUrl) {
     
     const processSheet = (rows, startId, defaultCategory, isOrganic) => {
       return (rows || []).filter(item => {
-        const qtyRaw = item.qty || item.Qty || '';
-        if (typeof qtyRaw === 'string' && qtyRaw.toLowerCase() === 'n') return false;
-        return true;
-      }).map((item, idx) => {
+
+      // Ignore empty rows from Google Sheet
+      if (!item || !String(item.Name || '').trim()) {
+        return false;
+      }
+    
+      const qtyRaw = item.qty || item.Qty || '';
+    
+      if (typeof qtyRaw === 'string' && qtyRaw.toLowerCase() === 'n') {
+        return false;
+      }
+    
+      return true;
+    
+    }).map((item, idx) => {
         let category = defaultCategory;
         if (defaultCategory === null) {
           category = (item.Category || 'organic').trim().toLowerCase();
@@ -2826,7 +2837,7 @@ function loadProductsAndOffers(baseUrl) {
         
         return {
           id: startId + idx,
-          name: item.Name || 'Fresh Item',
+          name: String(item.Name).trim(),
           price: Number(item.Price) || 0,
           discountPrice: item['Price-off'] ? Number(item['Price-off']) : 0,
           unit: unitStr,
@@ -2835,7 +2846,7 @@ function loadProductsAndOffers(baseUrl) {
           discountPrices: discountPrices,
           category: category,
           imageUrl: item.Emoji || '',
-          showOnHomeRaw: item.ShowOnHome || `yes${idx+1}`,
+          showOnHomeRaw: item.ShowOnHome || '',
           offer: (item.ShowOnHome || '').toLowerCase().startsWith('yes'),
           isOrganic: isOrganic,
           tags: tags.toLowerCase(),
