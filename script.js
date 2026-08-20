@@ -905,50 +905,26 @@ function renderOffersPage() {
   if (cardOffers.length) {
     html += `<div class="offers-page-grid">`;
     cardOffers.forEach(offer => {
-      // Find the product matching this offer's product_id
-      let product = null;
-      if (offer.productId) {
-        product = products.find(p => p.id == offer.productId);
-      }
-      // If product not found, skip this offer or show a placeholder
-      if (!product) {
-        // Still show the offer card but with no add functionality
-        const fakeProduct = {
-          id: `offer_${offer.id}`,
-          name: offer.name,
-          unit: offer.unit,
-          price: offer.oldPrice,
-          discountPrice: offer.newPrice,
-          isOrganic: false,
-          category: 'offers',
-          imageUrl: offer.imageUrl,
-          tags: '',
-          label: '',
-          qty: 999,
-          description: offer.description || '',
-          highlight: offer.highlight || '',
-          othr_img: offer.othr_img || '',
-          units: [offer.unit],
-          prices: [offer.oldPrice],
-          discountPrices: [offer.newPrice]
-        };
-        html += createProductCard(fakeProduct, true);
-        return;
-      }
-      // Create a product object that uses the offer's prices but keeps the real product ID
-      const offerProduct = {
-        ...product,
+      const fakeProduct = {
+        id: offer.productId || `offer_${offer.id}`,
+        name: offer.name,
+        unit: offer.unit,
         price: offer.oldPrice,
         discountPrice: offer.newPrice,
-        // ensure id is the real product id
-        id: product.id,
-        // override unit if offer has a different unit (optional)
-        unit: offer.unit || product.unit,
-        units: [offer.unit || product.unit],
+        isOrganic: false,
+        category: 'offers',
+        imageUrl: offer.imageUrl,
+        tags: '',
+        label: '',
+        qty: 999,
+        description: offer.description || '',
+        highlight: offer.highlight || '',
+        othr_img: offer.othr_img || '',
+        units: [offer.unit],
         prices: [offer.oldPrice],
         discountPrices: [offer.newPrice]
       };
-      html += createProductCard(offerProduct, true);
+      html += createProductCard(fakeProduct, true);
     });
     html += `</div>`;
   }
