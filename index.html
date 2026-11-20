@@ -77,7 +77,8 @@
     <!-- ===== HEADER ===== -->
     <header>
         <div class="header-inner">
-            <div class="logo"><i class="fas fa-leaf"></i> Fresh Adat</div>
+            <button class="category-back" id="categoryBack" type="button" aria-label="Back to home" hidden><i class="fas fa-arrow-left" aria-hidden="true"></i></button>
+            <div class="logo" id="storeLogo"><i class="fas fa-leaf"></i> Fresh Adat</div>
             <div class="search-bar">
                 <i class="fas fa-search"></i>
                 <input type="text" id="desktopSearch" placeholder="Search vegetables, fruits, spices…" autocomplete="off" />
@@ -100,32 +101,37 @@
             </div>
         </div>
     </header>
-
     <!-- ===== MAIN ===== -->
-    <main>
-        <div class="category-header">
-            <div class="cat-row" id="catRow"></div>
-            <button class="arrow-more-btn" id="arrowMoreBtn"><i class="fas fa-chevron-right"></i></button>
-        </div>
-
-        <div class="offers-teaser-section" id="offersTeaserSection" style="display: none;">
-            <div class="offers-teaser-header">
-                <h3><i class="fas fa-tag"></i> Offers for you</h3>
-                <span class="offers-countdown" id="homeOffersTimer"></span>
+<main>
+    <div id="homeSections" hidden>
+        <section class="home-categories-section" aria-label="Shop by category">
+            <div class="home-categories-grid" id="homeCategoriesGrid"></div>
+        </section>
+        <section class="home-horizontal-section" id="popularProductsSection" hidden>
+            <div class="carousel-header"><h3>Fresh Picks</h3></div>
+            <div class="horizontal-scroll-wrapper" id="popularProductsSlider"></div>
+        </section>
+        <section class="home-slideshow-section" aria-label="Store promotions">
+            <div class="home-slideshow" id="homeSlideshow"></div>
+        </section>
+        <section class="home-deals-section" id="moreHomeProductsSection" hidden>
+            <div class="carousel-header"><h3>More Fresh Picks</h3></div>
+            <div class="deals-grid" id="moreHomeProductsGrid"></div>
+        </section>
+    </div>
+    <h1 class="category-title" id="categoryTitle" tabindex="-1" hidden></h1>
+    <div class="catalog-layout" id="catalogLayout">
+        <nav class="subcategory-nav" id="subcategoryNav" aria-label="Subcategories" hidden></nav>
+        <div class="catalog-items">
+            <div class="products-grid" id="productsGrid"></div>
+            <div class="freezer-entrance" id="freezerEntrance" aria-hidden="true" hidden>
+                <div class="freezer-door freezer-door-left"></div>
+                <div class="freezer-door freezer-door-right"></div>
+                <div class="freezer-fog"></div>
             </div>
-            <div class="offers-teaser-scroll" id="offersTeaserScroll"></div>
         </div>
-
-        <div class="products-grid" id="productsGrid"></div>
-
-        <div class="home-carousel-section" id="homeCarouselSection" style="display: none;">
-            <div class="carousel-header">
-                <h3><i class="fas fa-star"></i> 🔥 More Fresh Picks</h3>
-                <span class="carousel-hint"><i class="fas fa-arrow-left"></i> Swipe to explore <i class="fas fa-arrow-right"></i></span>
-            </div>
-            <div class="horizontal-scroll-wrapper" id="homeCarousel"></div>
-        </div>
-    </main>
+    </div>
+</main>
 
     <!-- ===== CART PANEL ===== -->
     <div class="cart-overlay" id="cartOverlay"></div>
@@ -147,15 +153,23 @@
     </div>
 
     <!-- ===== CATEGORIES MODAL ===== -->
-    <div id="categoriesModal" class="categories-modal">
-        <div class="categories-modal-content">
-            <div class="categories-modal-header">
-                <h3><i class="fas fa-tags"></i> All Categories</h3>
-                <button class="close-categories-modal" id="closeCategoriesModal">&times;</button>
-            </div>
-            <div class="categories-grid" id="categoriesGrid"></div>
+    <dialog id="categoriesModal" class="categories-modal" aria-labelledby="categoriesTitle">
+        <div class="categories-modal-header">
+            <button class="category-back" id="closeCategoriesModal" type="button" aria-label="Back" autofocus>
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>
+            </button>
+            <h2 id="categoriesTitle">All Categories</h2>
+            <button class="category-back categories-search-button" id="categoriesSearchButton" type="button" aria-label="Search categories" aria-controls="categoriesSearch" aria-expanded="false">
+                <i class="fas fa-search" aria-hidden="true"></i>
+            </button>
+            <input class="categories-search" id="categoriesSearch" type="search" aria-label="Search categories" placeholder="Search categories" hidden>
         </div>
-    </div>
+        <div class="categories-grid" id="categoriesGrid"></div>
+        <p class="categories-empty" id="categoriesEmpty" role="status" hidden>No categories found.</p>
+        <section class="categories-promotions" id="categoryPromotions" aria-label="Category promotions" hidden>
+            <div class="home-slideshow" id="categorySlideshow"></div>
+        </section>
+    </dialog>
 
     <!-- ===== VISION MODAL ===== -->
     <div id="visionModal" class="vision-modal">

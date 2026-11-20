@@ -25,16 +25,19 @@ let products = [];
 let offers = [];
 let cart = {};
 let selectedCat = 'All';
+let selectedSubcategory = '';
 let searchTerm = '';
 let selectedSuggestionProduct = null;
 let isLoginMode = false;
 let isStoreOpen = true;
 
-let productsGrid, catRow, cartCountSpan, cartOverlay, cartPanel, cartItems, cartFooter, footerItems, footerTotal;
+let productsGrid, cartCountSpan, cartOverlay, cartPanel, cartItems, cartFooter, footerItems, footerTotal;
 let toastEl;
-let categoriesModal, categoriesGrid, arrowMoreBtn;
+let categoriesModal, categoriesGrid;
 let desktopSearch, mobileSearch, desktopClearBtn, mobileClearBtn, desktopSuggestions, mobileSuggestions;
 let imageMap = {};
+let featuredCategoryNames = null;
+let shortcutImageKeys = [];
 
 let stickyBar, stickyCountSpan, stickySavingsSpan, stickyFreeBadge, stickyCartBtn, stickyToggleBtn, stickyDetailedDiv;
 let stickyDetailedOpen = false;
@@ -85,7 +88,7 @@ const FALLBACK_IMAGES = {
   slide2: 'https://via.placeholder.com/800x400?text=Slide+2',
   slide3: 'https://via.placeholder.com/800x400?text=Slide+3',
   'vegitable-fresh': 'https://via.placeholder.com/90?text=Fresh+Veg',
-  'vegitable-fresh-leafs': 'https://via.placeholder.com/90?text=Fresh+Leafs',
+  'ice-cream': 'https://via.placeholder.com/90?text=Ice+Cream',
   'fruits-fresh': 'https://via.placeholder.com/90?text=Fresh+Fruits',
   diary: 'https://via.placeholder.com/90?text=Dairy',
   meats: 'https://via.placeholder.com/90?text=Meats',
@@ -350,10 +353,9 @@ function escapeHtml(str) {
   return str.replace(/[&<>]/g, m => (m === '&' ? '&amp;' : m === '<' ? '&lt;' : m === '>' ? '&gt;' : m));
 }
 
-function getHomeOrderNumber(showOnHomeValue) {
-  if (!showOnHomeValue) return 9999;
-  const match = showOnHomeValue.match(/yes[-_]?(\d+)/i);
-  return match && match[1] ? parseInt(match[1], 10) : 9999;
+function getHomeOrderNumber(value) {
+  const match = String(value ?? '').trim().match(/^yes(?:[-_]?([1-9]\d*))?$/i);
+  return match ? Number(match[1] ?? Infinity) : null;
 }
 
 function productMatchesSearch(p, term) {
@@ -861,7 +863,6 @@ function renderOffersTeaser() {
   document.querySelectorAll('.offer-teaser-card').forEach(card => {
     card.addEventListener('click', () => {
       selectedCat = 'Offers';
-      renderCategories();
       renderProducts();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -1040,142 +1041,213 @@ function addOfferToCart() {
 }
 
 // ========== HOMEPAGE LAYOUT ==========
+const homeCategoryTiles = [
+    ['vegitable-fresh', 'Vegetables'],
+    ['fruits-fresh', 'Fruits'],
+    ['meats', 'Meat'],
+    ['diary', 'Dairy & Eggs'],
+    ['ice-cream', 'Ice Cream & Frozen Dessert'],
+    ['rice', 'Rice'],
+    ['oils', 'Oils'],
+    ['Cut Vegetables', 'Cut Vegetables'],
+    ['organic', 'Organic'],
+    ['powders', 'Powders'],
+    ['personal-care', 'Personal Care'],
+    ['cleaners-and-repellents', 'Cleaners and Repellents'],
+    ['More', 'More']
+];
+
+function getCategoryLabel(category) {
+  return homeCategoryTiles.find(([key]) => key === category)?.[1] ||
+    category.replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function readCategoryDisplayRows(rows) {
+  featuredCategoryNames = null;
+  shortcutImageKeys = [];
+
+  for (const row of rows) {
+    const fields = Object.fromEntries(Object.entries(row).map(([key, value]) => [key.trim().toLowerCase(), value]));
+    const name = String(fields.name ?? '').trim().toLowerCase();
+    const url = String(fields.image_url ?? '').trim();
+    if (name && /^https?:\/\//i.test(url)) imageMap[name] = url;
+
+    if (!Object.hasOwn(fields, 'show')) continue;
+    featuredCategoryNames ??= [];
+    const show = String(fields.show ?? '').trim().toLowerCase();
+    if (show === 'h' && name) featuredCategoryNames.push(name);
+    if (show === 'c' && name.startsWith('subcategory:')) shortcutImageKeys.push(name);
+  }
+}
+
+function getFeaturedCategories() {
+  if (featuredCategoryNames === null) {
+    return homeCategoryTiles.map(([category]) => category).filter(category => category !== 'More').slice(0, 11);
+  }
+
+  const categoriesByName = new Map(getCategoryList().slice(2).map(category => [category.toLowerCase(), category]));
+  return [...new Set(featuredCategoryNames.map(name => categoriesByName.get(name)).filter(Boolean))].slice(0, 11);
+}
+
+function getCategoryShortcuts() {
+  const categoriesByName = new Map(getCategoryList().slice(2).map(category => [category.toLowerCase(), category]));
+  const shortcuts = [];
+  for (const imageKey of new Set(shortcutImageKeys)) {
+    const match = imageKey.match(/^subcategory:([^:]+):(.+)$/);
+    if (!match) continue;
+    const category = categoriesByName.get(match[1].trim());
+    const subcategory = match[2].trim().replace(/\s+/g, ' ');
+    if (!category) continue;
+    const product = products.find(item =>
+      productBelongsToCategory(item, category) && item.subcategory?.toLowerCase() === subcategory
+    );
+    if (!product) continue;
+    shortcuts.push({
+      category,
+      subcategory,
+      label: product.subcategory,
+      imageUrl: imageMap[imageKey] || product.imageUrl || getImageUrl(category)
+    });
+  }
+  return shortcuts;
+}
+
+function renderHomeCategoryGrid() {
+  const grid = document.getElementById('homeCategoriesGrid');
+  grid.replaceChildren();
+  for (const category of [...getFeaturedCategories(), 'More']) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'home-category-card';
+
+    const imageWrap = document.createElement('span');
+    imageWrap.className = 'home-category-img-wrap';
+    if (category === 'More') {
+      const icon = document.createElement('i');
+      icon.className = 'fas fa-th-large';
+      icon.setAttribute('aria-hidden', 'true');
+      imageWrap.append(icon);
+    } else {
+      const image = document.createElement('img');
+      image.src = getImageUrl(category);
+      image.alt = '';
+      imageWrap.append(image);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'home-category-name';
+    name.textContent = getCategoryLabel(category);
+    button.append(imageWrap, name);
+    button.addEventListener('click', () => {
+      if (category === 'More') {
+        openCategoriesModal();
+        return;
+      }
+      openProductCategory(category);
+    });
+    grid.append(button);
+  }
+}
+
 function renderCustomHomeLayout() {
-  const teaserSection = document.getElementById('offersTeaserSection');
-  if (teaserSection) teaserSection.style.display = 'none';
+  productsGrid.style.display = 'none';
 
-  let bannerHtml = '';
-  let closeTimer = null;
-  if (!localStorage.getItem('announcement_closed')) {
-    bannerHtml = `<div id="announcementBanner" class="announcement-banner">
-      <div class="announcement-content">
-        <i class="fas fa-star" style="color: var(--orange);"></i>
-        <span>🌟 New Products Added Daily! ഞങ്ങൾ ദിവസവും പുതിയ ഉൽപ്പന്നങ്ങൾ ചേർക്കുന്നു. നിങ്ങൾ അന്വേഷിക്കുന്ന ഉൽപ്പന്നം ഇപ്പോൾ ലഭ്യമല്ലെങ്കിൽ ഉടൻ തന്നെ ലഭ്യമാക്കുന്നതാണ്. Thank you for your support!</span>
-        <button class="close-banner" id="closeAnnouncementBtn">×</button>
-      </div>
-    </div>`;
-  }
+  const ranked = products
+    .map(product => ({ product, order: getHomeOrderNumber(product.showOnHomeRaw) }))
+    .filter(({ order }) => order !== null)
+    .sort((a, b) => a.order - b.order);
 
-  productsGrid.classList.add('block');
-  productsGrid.style.display = 'block';
-  const sortedAll = [...products].sort((a,b) => getHomeOrderNumber(a.showOnHomeRaw) - getHomeOrderNumber(b.showOnHomeRaw));
-  const firstFour = sortedAll.slice(0,4);
-  const nextTen = sortedAll.slice(4,14);
-  let firstFourHtml = `<div class="first-four-grid">`;
-  firstFour.forEach(p => { firstFourHtml += createProductCard(p, true); });
-  firstFourHtml += `</div>`;
-  const slide1Url = getImageUrl('slide1');
-  const slide2Url = getImageUrl('slide2');
-  const slide3Url = getImageUrl('slide3');
-  const slideshowHtml = `<div class="home-slideshow"><div class="slide active"><img src="${slide1Url}" alt="Fresh vegetables"></div><div class="slide"><img src="${slide2Url}" alt="Organic fruits"></div><div class="slide"><img src="${slide3Url}" alt="Leafy greens"></div><div class="slideshow-dots"></div></div>`;
+  const sliderItems = ranked.slice(0, 4);
+  const gridItems = ranked.slice(4);
+  document.getElementById('popularProductsSection').hidden = sliderItems.length === 0;
+  document.getElementById('moreHomeProductsSection').hidden = gridItems.length === 0;
 
-  // ✅ Category strip — includes Personal Care
-  const categoryStripHtml = `<div class="category-strip">
-    <div class="category-square" data-cat-value="vegitable-fresh"><img class="square-img" src="${getImageUrl('vegitable-fresh')}" alt="Fresh Veg"><span class="square-name">Fresh Veg</span></div>
-    <div class="category-square" data-cat-value="vegitable-fresh-leafs"><img class="square-img" src="${getImageUrl('vegitable-fresh-leafs')}" alt="Fresh Leafs"><span class="square-name">Fresh Leafs</span></div>
-    <div class="category-square" data-cat-value="fruits-fresh"><img class="square-img" src="${getImageUrl('fruits-fresh')}" alt="Fresh Fruits"><span class="square-name">Fresh Fruits</span></div>
-    <div class="category-square" data-cat-value="diary"><img class="square-img" src="${getImageUrl('diary')}" alt="Dairy & Egg"><span class="square-name">Dairy & Egg</span></div>
-    <div class="category-square" data-cat-value="meats"><img class="square-img" src="${getImageUrl('meats')}" alt="Meats"><span class="square-name">Meats</span></div>
-    <div class="category-square" data-cat-value="personal-care"><img class="square-img" src="${getImageUrl('personal-care')}" alt="Personal Care"><span class="square-name">Personal Care</span></div>
-  </div>`;
-
-  productsGrid.innerHTML = bannerHtml + firstFourHtml + slideshowHtml + categoryStripHtml;
-
-  if (bannerHtml) {
-    setTimeout(() => {
-      const banner = document.getElementById('announcementBanner');
-      const closeBtn = document.getElementById('closeAnnouncementBtn');
-
-      const removeBanner = () => {
-        if (banner && banner.parentNode) banner.remove();
-        if (closeTimer) clearTimeout(closeTimer);
-        localStorage.setItem('announcement_closed', 'true');
-      };
-
-      closeTimer = setTimeout(() => {
-        removeBanner();
-      }, 15000);
-
-      if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-          removeBanner();
-        });
-      }
-    }, 0);
-  }
-
-  initSlideshow();
-  attachCategorySquareEvents();
-  renderHomeCarousel(nextTen);
-  renderOffersTeaser();
-  updateStoreStatusUI();
+  const slider = document.getElementById('popularProductsSlider');
+  const scrollLeft = slider.scrollLeft;
+  slider.innerHTML = sliderItems.map(({ product }) => createProductCard(product)).join('');
+  slider.scrollLeft = scrollLeft;
+  document.getElementById('moreHomeProductsGrid').innerHTML =
+    gridItems.map(({ product }) => createProductCard(product)).join('');
 }
 
-function initSlideshow() {
-  const slideshow = document.querySelector('.home-slideshow');
-  if (!slideshow) return;
-  const slides = slideshow.querySelectorAll('.slide');
-  const dotsContainer = slideshow.querySelector('.slideshow-dots');
-  if (!slides.length) return;
-  dotsContainer.innerHTML = '';
-  slides.forEach((_, idx) => {
-    const dot = document.createElement('span');
-    dot.classList.add('dot');
-    if (idx === 0) dot.classList.add('active');
-    dot.addEventListener('click', () => {
-      slides.forEach((s,i) => s.classList.toggle('active', i === idx));
-      dotsContainer.querySelectorAll('.dot').forEach((d,i) => d.classList.toggle('active', i === idx));
-    });
-    dotsContainer.appendChild(dot);
-  });
+const slideshowTimers = new Map();
+
+function renderSlideshowBanners(rows, containerId, names) {
+  const container = document.getElementById(containerId);
+  clearInterval(slideshowTimers.get(containerId));
+  slideshowTimers.delete(containerId);
+  container.replaceChildren();
+  if (!names.length) return;
+
+  const slides = [];
+  const dots = [];
+  const dotsWrap = document.createElement('div');
+  dotsWrap.className = 'slideshow-dots';
   let currentIndex = 0;
-  setInterval(() => {
-    currentIndex = (currentIndex + 1) % slides.length;
-    slides.forEach((s,i) => s.classList.toggle('active', i === currentIndex));
-    const dots = dotsContainer.querySelectorAll('.dot');
-    dots.forEach((d,i) => d.classList.toggle('active', i === currentIndex));
-  }, 4000);
-}
 
-function attachCategorySquareEvents() {
-  document.querySelectorAll('.category-square').forEach(sq => {
-    sq.addEventListener('click', () => {
-      const catValue = sq.dataset.catValue;
-      if (catValue) {
-        selectedCat = catValue;
-        renderCategories();
-        renderProducts();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+  function showSlide(index) {
+    currentIndex = index % slides.length;
+    slides.forEach((slide, i) => slide.classList.toggle('active', i === currentIndex));
+    dots.forEach((dot, i) => {
+      dot.classList.toggle('active', i === currentIndex);
+      dot.setAttribute('aria-pressed', String(i === currentIndex));
     });
+  }
+
+  names.forEach((name, index) => {
+    const row = rows.find(entry =>
+      String(entry.name ?? entry.Name ?? '').trim().toLowerCase() === name
+    );
+    const slide = document.createElement('div');
+    slide.className = 'slide';
+    const image = document.createElement('img');
+    image.src = getImageUrl(name);
+    image.alt = row?.Title || row?.title || 'Fresh Adat promotion ' + (index + 1);
+    slide.append(image);
+
+    const link = String(row?.Link ?? row?.link ?? '').trim();
+    if (/^(?:https?:\/\/|\/(?![\/\\])|#)/i.test(link)) {
+      const button = document.createElement('a');
+      button.className = 'slide-cta';
+      button.href = link;
+      button.textContent = row.ButtonText || row.buttonText || 'Shop Now';
+      slide.append(button);
+    }
+    slides.push(slide);
+    container.append(slide);
+
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'dot';
+    dot.setAttribute('aria-label', 'Show promotion ' + (index + 1));
+    dot.addEventListener('click', () => showSlide(index));
+    dots.push(dot);
+    dotsWrap.append(dot);
   });
+
+  showSlide(0);
+  if (slides.length > 1) {
+    container.append(dotsWrap);
+    slideshowTimers.set(containerId, setInterval(() => {
+      if (container.closest('dialog')?.open !== false) showSlide(currentIndex + 1);
+    }, 4500));
+  }
 }
 
-function renderHomeCarousel(productsToShow = null) {
-  const carouselSection = document.getElementById('homeCarouselSection');
-  const carouselContainer = document.getElementById('homeCarousel');
-  if (!carouselSection || !carouselContainer) return;
-  let items = productsToShow;
-  if (!items || items.length === 0) {
-    const sorted = [...products].sort((a,b) => getHomeOrderNumber(a.showOnHomeRaw) - getHomeOrderNumber(b.showOnHomeRaw));
-    items = sorted.slice(4,14);
-  }
-  if (items.length === 0) {
-    carouselSection.style.display = 'none';
-    return;
-  }
-  carouselSection.style.display = 'block';
-  let carouselHtml = '';
-  items.forEach(p => { carouselHtml += createProductCard(p, true); });
-  carouselContainer.innerHTML = carouselHtml;
+function renderStoreSlides(rows) {
+  renderSlideshowBanners(rows, 'homeSlideshow', ['slide1', 'slide2', 'slide3']);
+  const names = [...new Set(rows
+    .map(row => String(row.name ?? row.Name ?? '').trim().toLowerCase())
+    .filter(name => /^(?:slide_c_[1-9]\d*|slide)$/.test(name) && imageMap[name]))]
+    .sort((a, b) => (Number(a.slice(8)) || Infinity) - (Number(b.slice(8)) || Infinity));
+  document.getElementById('categoryPromotions').hidden = !names.length;
+  renderSlideshowBanners(rows, 'categorySlideshow', names);
 }
 
 function renderSuggestionBasedResults(selectedProduct) {
   const teaserSection = document.getElementById('offersTeaserSection');
   if (teaserSection) teaserSection.style.display = 'none';
 
-  const homeCarouselSection = document.getElementById('homeCarouselSection');
-  if (homeCarouselSection) homeCarouselSection.style.display = 'none';
   productsGrid.classList.add('block');
   productsGrid.style.display = 'block';
   const matchedOthers = products.filter(p => productMatchesByTagSubstring(selectedProduct, p));
@@ -1220,8 +1292,6 @@ function renderSearchResults() {
   const teaserSection = document.getElementById('offersTeaserSection');
   if (teaserSection) teaserSection.style.display = 'none';
 
-  const homeCarouselSection = document.getElementById('homeCarouselSection');
-  if (homeCarouselSection) homeCarouselSection.style.display = 'none';
   let matched = products.filter(p => productMatchesSearch(p, searchTerm));
   if (matched.length === 0) {
     productsGrid.classList.remove('block');
@@ -1283,6 +1353,107 @@ function renderSearchResults() {
   }
 }
 
+function stopFreezerEntrance() {
+  const entrance = document.getElementById('freezerEntrance');
+  if (entrance.hidden) return;
+  entrance.hidden = true;
+  document.getElementById('catalogLayout').inert = false;
+}
+
+function playFreezerEntrance() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !productsGrid.querySelector('.product-card')) return;
+  document.getElementById('freezerEntrance').hidden = false;
+  document.getElementById('catalogLayout').inert = true;
+}
+
+function openProductCategory(category, subcategory = '') {
+  const enteringIceCream = category === 'ice-cream' && selectedCat !== category;
+  selectedCat = category;
+  selectedSubcategory = subcategory;
+  searchTerm = '';
+  selectedSuggestionProduct = null;
+  [desktopSearch, mobileSearch].forEach(input => {
+    if (input) input.value = '';
+  });
+  [desktopSuggestions, mobileSuggestions].forEach(list => list?.classList.remove('active'));
+  document.getElementById('mobileSearchRow')?.classList.remove('open');
+  updateClearButtons();
+  document.getElementById('subcategoryNav').scrollTop = 0;
+  renderProducts();
+  window.scrollTo({ top: 0 });
+  if (enteringIceCream) playFreezerEntrance();
+}
+
+function renderSubcategoryNavigation(categoryProducts) {
+  const nav = document.getElementById('subcategoryNav');
+  const groups = new Map();
+  for (const product of categoryProducts) {
+    const label = product.subcategory;
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { label, productImage: '' });
+    const group = groups.get(key);
+    if (!group.productImage && /^https?:\/\//i.test(product.imageUrl || '')) {
+      group.productImage = product.imageUrl;
+    }
+  }
+  if (!groups.has(selectedSubcategory)) selectedSubcategory = '';
+
+  const buttons = new Map();
+  const options = [['', { label: 'All' }], ...groups];
+  for (const [key, { label, productImage }] of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'subcategory-button';
+    button.setAttribute('aria-pressed', String(key === selectedSubcategory));
+    const imageKey = 'subcategory:' + selectedCat.toLowerCase() + ':' + key;
+    const imageUrl = key ? imageMap[imageKey] || productImage : '';
+    if (imageUrl) {
+      const image = document.createElement('img');
+      image.src = imageUrl;
+      image.alt = '';
+      image.loading = 'lazy';
+      button.append(image);
+    } else {
+      const icon = document.createElement('i');
+      icon.className = 'fas fa-th-large';
+      icon.setAttribute('aria-hidden', 'true');
+      button.append(icon);
+    }
+    const title = document.createElement('span');
+    title.textContent = label;
+    button.append(title);
+    buttons.set(key, button);
+    button.addEventListener('click', () => {
+      selectedSubcategory = key;
+      renderCategoryProducts(categoryProducts);
+      for (const [option, item] of buttons) {
+        item.setAttribute('aria-pressed', String(option === key));
+      }
+      window.scrollTo({ top: 0 });
+    });
+  }
+  const focusedKey = [...nav.children].findIndex(button => button === document.activeElement);
+  nav.replaceChildren(...buttons.values());
+  if (focusedKey >= 0) nav.children[focusedKey]?.focus({ preventScroll: true });
+}
+
+function renderCategoryProducts(categoryProducts) {
+  const filtered = categoryProducts.filter(product =>
+    !selectedSubcategory || product.subcategory?.toLowerCase() === selectedSubcategory
+  );
+  filtered.sort((a, b) => (b.offer === true) - (a.offer === true));
+  productsGrid.innerHTML = filtered.length
+    ? filtered.map(product => createProductCard(product, true)).join('')
+    : '<div class="no-results">No products found</div>';
+}
+
+function productBelongsToCategory(product, category) {
+  if (category === 'Cut Vegetables') return isCutVegetable(product.category);
+  if (category === 'organic') return product.isOrganic || product.category === 'organic';
+  return product.category === category;
+}
+
 function renderFilteredGrid() {
   const teaserSection = document.getElementById('offersTeaserSection');
   if (teaserSection) teaserSection.style.display = 'none';
@@ -1294,28 +1465,24 @@ function renderFilteredGrid() {
 
   productsGrid.classList.remove('block');
   productsGrid.style.display = 'grid';
-  let filtered = products.filter(p => {
-    if (selectedCat === 'All') {
-      if (searchTerm !== '') return productMatchesSearch(p, searchTerm);
-      return p.showOnHomeRaw && p.showOnHomeRaw.toLowerCase().startsWith('yes');
-    } else if (selectedCat === 'Cut Vegetables') return isCutVegetable(p.category);
-    else return p.category === selectedCat;
-  });
-  if (selectedCat === 'All' && searchTerm === '') {
-    filtered.sort((a,b) => getHomeOrderNumber(a.showOnHomeRaw) - getHomeOrderNumber(b.showOnHomeRaw));
-  } else {
-    filtered.sort((a,b) => (b.offer === true) - (a.offer === true));
-  }
-  if (!filtered.length) {
-    productsGrid.innerHTML = `<div class="no-results" style="grid-column:1/-1; padding:40px;">✨ No products found</div>`;
-  } else {
-    productsGrid.innerHTML = filtered.map(p => createProductCard(p, true)).join('');
-  }
-  const carouselSection = document.getElementById('homeCarouselSection');
-  if (carouselSection) carouselSection.style.display = 'none';
+  const categoryProducts = products.filter(product => productBelongsToCategory(product, selectedCat));
+  renderSubcategoryNavigation(categoryProducts);
+  renderCategoryProducts(categoryProducts);
 }
 
 function renderProducts() {
+  const onCategory = selectedCat !== 'All';
+  const searching = searchTerm !== '' || selectedSuggestionProduct !== null;
+  if (selectedCat !== 'ice-cream' || searching) stopFreezerEntrance();
+  const showSubcategories = onCategory && !searching && selectedCat !== 'Offers';
+  const categoryTitle = document.getElementById('categoryTitle');
+  categoryTitle.hidden = !onCategory || searching;
+  categoryTitle.textContent = onCategory ? getCategoryLabel(selectedCat) : '';
+  document.getElementById('categoryBack').hidden = !onCategory;
+  document.getElementById('storeLogo').hidden = onCategory;
+  document.getElementById('homeSections').hidden = onCategory || searching;
+  document.getElementById('subcategoryNav').hidden = !showSubcategories;
+  document.getElementById('catalogLayout').classList.toggle('has-subcategories', showSubcategories);
   if (selectedSuggestionProduct !== null) {
     renderSuggestionBasedResults(selectedSuggestionProduct);
     return;
@@ -1333,25 +1500,10 @@ function renderProducts() {
 }
 
 function getCategoryList() {
-  let dynamicCats = [...new Set(products.map(p => p.category ? p.category.trim().toLowerCase() : ''))];
-  dynamicCats = dynamicCats.filter(c => c && !isCutVegetable(c));
-  return ['All', 'Offers', 'Cut Vegetables', ...dynamicCats];
-}
-
-function renderCategories() {
-  const categoryList = getCategoryList();
-  catRow.innerHTML = categoryList.map(c => {
-    let displayName = c === 'Cut Vegetables' ? '🥒 Cut Vegetables' : c === 'All' ? '📦 All' : c === 'Offers' ? '🔥 Offers' : c;
-    return `<button class="cat-chip ${selectedCat === c ? 'active' : ''}" data-cat="${c}">${displayName}</button>`;
-  }).join('');
-  document.querySelectorAll('.cat-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      selectedCat = btn.dataset.cat;
-      renderCategories();
-      renderProducts();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  });
+  const dynamic = products.map(product => product.category?.trim().toLowerCase())
+    .filter(category => category && !isCutVegetable(category));
+  const main = homeCategoryTiles.map(([category]) => category).filter(category => category !== 'More');
+  return ['All', 'Offers', ...new Set([...main, ...dynamic])];
 }
 
 // ========== SEARCH SUGGESTIONS ==========
@@ -2691,24 +2843,57 @@ function showStaticContent(title, content) {
 
 // ========== CATEGORIES MODAL ==========
 function openCategoriesModal() {
-  const allCats = getCategoryList();
-  categoriesGrid.innerHTML = allCats.map(cat => {
-    const key = cat.toLowerCase();
-    let imgUrl = getImageUrl(key);
-    return `<div class="category-item" data-category="${cat}"><img class="category-image" src="${imgUrl}" alt="${cat}" loading="lazy"><span class="category-name">${cat}</span></div>`;
-  }).join('');
-  pushPageState('categories');
-  categoriesModal.classList.add('open');
-  document.querySelectorAll('.category-item').forEach(item => {
-    item.addEventListener('click', () => {
-      selectedCat = item.dataset.category;
-      renderCategories();
-      renderProducts();
+  const mainCategories = getCategoryList().map(category => ({
+    category,
+    label: getCategoryLabel(category),
+    imageUrl: getImageUrl(category)
+  }));
+  const items = [...mainCategories, ...getCategoryShortcuts()].map(({ category, subcategory, label, imageUrl }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'category-item';
+
+    const image = document.createElement('img');
+    image.className = 'category-image';
+    image.src = imageUrl;
+    image.alt = '';
+    image.loading = 'lazy';
+
+    const name = document.createElement('span');
+    name.className = 'category-name';
+    name.textContent = label;
+    button.append(image, name);
+    button.addEventListener('click', () => {
       closeCategoriesModal();
+      openProductCategory(category, subcategory);
+      if (category !== 'All') document.getElementById('categoryTitle').focus({ preventScroll: true });
     });
+    return button;
   });
+  categoriesGrid.replaceChildren(...items);
+  const search = document.getElementById('categoriesSearch');
+  search.value = '';
+  search.hidden = true;
+  document.getElementById('categoriesSearchButton').setAttribute('aria-expanded', 'false');
+  filterCategoryTiles();
+  if (!categoriesModal.open) {
+    pushPageState('categories');
+    categoriesModal.showModal();
+  }
+  categoriesModal.scrollTop = 0;
 }
-function closeCategoriesModal() { categoriesModal.classList.remove('open'); }
+
+function closeCategoriesModal() { categoriesModal.close(); }
+
+function filterCategoryTiles() {
+  const query = document.getElementById('categoriesSearch').value.trim().toLowerCase();
+  let matches = 0;
+  for (const button of categoriesGrid.children) {
+    button.hidden = !button.textContent.toLowerCase().includes(query);
+    if (!button.hidden) matches++;
+  }
+  document.getElementById('categoriesEmpty').hidden = matches > 0;
+}
 
 // ========== LOAD DATA ==========
 function loadData() {
@@ -2766,7 +2951,7 @@ function loadData() {
 function loadProductsAndOffers(baseUrl) {
   const sheetMapping = [
     { sheet: 'Sheet1', category: 'vegitable-fresh', isOrganic: false },
-    { sheet: 'Sheet10', category: 'vegitable-fresh-leafs', isOrganic: false },
+    { sheet: 'Sheet10', category: 'ice-cream', isOrganic: false },
     { sheet: 'Sheet11', category: 'fruits-fresh', isOrganic: false },
     { sheet: 'Sheet12', category: 'diary', isOrganic: false },
     { sheet: 'Sheet13', category: 'meats', isOrganic: false },
@@ -2775,12 +2960,13 @@ function loadProductsAndOffers(baseUrl) {
     { sheet: 'Sheet16', category: 'powders', isOrganic: false },
     { sheet: 'Sheet19', category: 'personal-care', isOrganic: false },   // ← NEW
     { sheet: 'Sheet2', category: null, isOrganic: true },
-    { sheet: 'Sheet4', category: 'cut-vegetable', isOrganic: false }
+    { sheet: 'Sheet4', category: 'cut-vegetable', isOrganic: false },
+    { sheet: 'Sheet20', category: 'cleaners-and-repellents', isOrganic: false }
   ];
 
   const fetchPromises = sheetMapping.map(({ sheet }) =>
-    fetch(`${baseUrl}/${sheet}`)
-      .then(res => res.json())
+    fetch(`${baseUrl}/${encodeURIComponent(sheet)}`)
+      .then(res => res.ok ? res.json() : [])
       .catch(() => [])
   );
 
@@ -2794,19 +2980,10 @@ function loadProductsAndOffers(baseUrl) {
     const sheet5Data = results[sheetMapping.length];
     const sheet6Data = results[sheetMapping.length + 1];
 
-    if (sheet5Data && sheet5Data.length) {
-      sheet5Data.forEach(row => {
-        let nameKey = null, url = null;
-        for (let [col, val] of Object.entries(row)) {
-          if (col.toLowerCase() === 'name') nameKey = val;
-          if (col.toLowerCase() === 'image_url') url = val;
-        }
-        if (nameKey && url && url.startsWith('http')) imageMap[nameKey.toLowerCase()] = url;
-      });
-    }
+    readCategoryDisplayRows(Array.isArray(sheet5Data) ? sheet5Data : []);
 
     const processSheet = (rows, startId, defaultCategory, isOrganic) => {
-      return (rows || []).filter(item => {
+      return (Array.isArray(rows) ? rows : []).filter(item => {
         if (!item || !String(item.Name || '').trim()) {
           return false;
         }
@@ -2855,6 +3032,7 @@ function loadProductsAndOffers(baseUrl) {
           prices: prices,
           discountPrices: discountPrices,
           category: category,
+          subcategory: String(item.Subcategory ?? item.SubCategory ?? '').trim().replace(/\s+/g, ' '),
           imageUrl: item.Emoji || '',
           showOnHomeRaw: item.ShowOnHome || '',
           offer: (item.ShowOnHome || '').toLowerCase().startsWith('yes'),
@@ -2905,7 +3083,8 @@ function loadProductsAndOffers(baseUrl) {
       offers = [];
     }
 
-    renderCategories();
+    renderHomeCategoryGrid();
+    renderStoreSlides(Array.isArray(sheet5Data) ? sheet5Data : []);
     renderProducts();
     updateStickyCartBar();
   }).catch(err => {
@@ -2916,10 +3095,11 @@ function loadProductsAndOffers(baseUrl) {
       { id:3, name:'Lady Finger', price:70, discountPrice:60, unit:'500g, 1kg', units:['500g', '1kg'], prices:[40, 70], discountPrices:[30, 60], category:'vegitable-fresh', showOnHomeRaw:'yes3', offer:true, isOrganic:false, tags:'okra', label:'buy 1 get 1', qty:5, description:'Tender lady fingers, great for curries.', highlight:'High in fiber, Fresh stock', othr_img:'' },
       { id:4, name:'Carrot', price:45, discountPrice:0, unit:'1kg', units:['1kg'], prices:[45], discountPrices:[0], category:'vegitable-fresh', showOnHomeRaw:'yes4', offer:false, isOrganic:false, tags:'carrot', label:'', qty:3, description:'Crunchy carrots, rich in vitamins.', highlight:'Good for eyesight, Organic', othr_img:'' },
       { id:5, name:'Broccoli', price:80, discountPrice:70, unit:'250g, 500g', units:['250g', '500g'], prices:[45, 80], discountPrices:[35, 70], category:'vegitable-fresh', showOnHomeRaw:'yes5', offer:true, isOrganic:true, tags:'broccoli', label:'', qty:2, description:'Fresh organic broccoli, high in fiber.', highlight:'Superfood, Rich in antioxidants', othr_img:'' },
-      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'1kg', units:['1kg'], prices:[25], discountPrices:[20], category:'vegitable-fresh-leafs', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8, description:'Nutrient-rich spinach leaves.', highlight:'Iron-rich, Organic', othr_img:'' }
+      { id:6, name:'Spinach', price:25, discountPrice:20, unit:'1kg', units:['1kg'], prices:[25], discountPrices:[20], category:'vegitable-fresh', showOnHomeRaw:'yes6', offer:true, isOrganic:true, tags:'spinach', label:'Fresh Stock', qty:8, description:'Nutrient-rich spinach leaves.', highlight:'Iron-rich, Organic', othr_img:'' }
     ];
     offers = [];
-    renderCategories();
+    renderHomeCategoryGrid();
+    renderStoreSlides([]);
     renderProducts();
     updateStickyCartBar();
   });
@@ -2955,6 +3135,7 @@ function resetToHome() {
   const visionModalElem = document.getElementById('visionModal');
   if (visionModalElem) visionModalElem.classList.remove('open');
   selectedCat = 'All';
+  selectedSubcategory = '';
   searchTerm = '';
   selectedSuggestionProduct = null;
   if (desktopSearch) desktopSearch.value = '';
@@ -2962,7 +3143,6 @@ function resetToHome() {
   if (desktopSuggestions) desktopSuggestions.classList.remove('active');
   if (mobileSuggestions) mobileSuggestions.classList.remove('active');
   updateClearButtons();
-  renderCategories();
   renderProducts();
 }
 
@@ -3106,7 +3286,6 @@ function initAddressFlow() {
 document.addEventListener('DOMContentLoaded', () => {
   try {
     productsGrid = document.getElementById('productsGrid');
-    catRow = document.getElementById('catRow');
     cartCountSpan = document.getElementById('cartCount');
     cartOverlay = document.getElementById('cartOverlay');
     cartPanel = document.getElementById('cartPanel');
@@ -3117,7 +3296,6 @@ document.addEventListener('DOMContentLoaded', () => {
     toastEl = document.getElementById('toast');
     categoriesModal = document.getElementById('categoriesModal');
     categoriesGrid = document.getElementById('categoriesGrid');
-    arrowMoreBtn = document.getElementById('arrowMoreBtn');
 
     stickyBar = document.getElementById('stickyCartBar');
     stickyCountSpan = document.getElementById('stickyCartCount');
@@ -3133,15 +3311,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (stickyCartBtn) stickyCartBtn.addEventListener('click', openCart);
     if (stickyToggleBtn) stickyToggleBtn.addEventListener('click', toggleStickyDetailed);
 
+    on('freezerEntrance', 'animationend', event => {
+      if (event.target === event.currentTarget && event.animationName === 'freezer-reveal') stopFreezerEntrance();
+    });
+    on('categoryBack', 'click', () => {
+      resetToHome();
+      window.scrollTo({ top: 0 });
+    });
     on('cartButton', 'click', openCart);
     on('closeCartBtn', 'click', closeCart);
     if (cartOverlay) cartOverlay.addEventListener('click', closeCart);
     on('orderBtn', 'click', openAddressFlow);
-    if (arrowMoreBtn) arrowMoreBtn.addEventListener('click', openCategoriesModal);
     on('closeCategoriesModal', 'click', closeCategoriesModal);
-    if (categoriesModal) {
-      categoriesModal.addEventListener('click', (e) => { if (e.target === categoriesModal) closeCategoriesModal(); });
-    }
+    on('categoriesSearch', 'input', filterCategoryTiles);
+    on('categoriesSearchButton', 'click', event => {
+      const input = document.getElementById('categoriesSearch');
+      input.hidden = !input.hidden;
+      event.currentTarget.setAttribute('aria-expanded', String(!input.hidden));
+      if (!input.hidden) {
+        input.focus();
+      } else {
+        input.value = '';
+        filterCategoryTiles();
+      }
+    });
 
     const mobileIcon = document.getElementById('mobileSearchIcon');
     const innerArrow = document.getElementById('mobileSearchInnerIcon');
