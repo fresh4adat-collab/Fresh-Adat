@@ -1356,14 +1356,33 @@ function renderSearchResults() {
 function stopFreezerEntrance() {
   const entrance = document.getElementById('freezerEntrance');
   if (entrance.hidden) return;
+  const button = document.getElementById('freezerOpenButton');
+  const restoreFocus = document.activeElement === button;
   entrance.hidden = true;
-  document.getElementById('catalogLayout').inert = false;
+  entrance.classList.remove('is-opening');
+  button.removeAttribute('aria-disabled');
+  productsGrid.inert = false;
+  if (restoreFocus && selectedCat === 'ice-cream' && !searchTerm) {
+    document.getElementById('categoryTitle').focus({ preventScroll: true });
+  }
 }
 
-function playFreezerEntrance() {
+function showFreezerEntrance() {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !productsGrid.querySelector('.product-card')) return;
+  productsGrid.inert = true;
   document.getElementById('freezerEntrance').hidden = false;
-  document.getElementById('catalogLayout').inert = true;
+  document.getElementById('freezerOpenButton').focus({ preventScroll: true });
+}
+
+function openFreezerDoors(event) {
+  const entrance = document.getElementById('freezerEntrance');
+  if (entrance.hidden || entrance.classList.contains('is-opening')) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    stopFreezerEntrance();
+    return;
+  }
+  event.currentTarget.setAttribute('aria-disabled', 'true');
+  entrance.classList.add('is-opening');
 }
 
 function openProductCategory(category, subcategory = '') {
@@ -1381,7 +1400,10 @@ function openProductCategory(category, subcategory = '') {
   document.getElementById('subcategoryNav').scrollTop = 0;
   renderProducts();
   window.scrollTo({ top: 0 });
-  if (enteringIceCream) playFreezerEntrance();
+  if (enteringIceCream) showFreezerEntrance();
+  if (category !== 'All' && document.getElementById('freezerEntrance').hidden) {
+    document.getElementById('categoryTitle').focus({ preventScroll: true });
+  }
 }
 
 function renderSubcategoryNavigation(categoryProducts) {
@@ -2866,7 +2888,6 @@ function openCategoriesModal() {
     button.addEventListener('click', () => {
       closeCategoriesModal();
       openProductCategory(category, subcategory);
-      if (category !== 'All') document.getElementById('categoryTitle').focus({ preventScroll: true });
     });
     return button;
   });
@@ -3311,6 +3332,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (stickyCartBtn) stickyCartBtn.addEventListener('click', openCart);
     if (stickyToggleBtn) stickyToggleBtn.addEventListener('click', toggleStickyDetailed);
 
+    on('freezerOpenButton', 'click', openFreezerDoors);
+    on('freezerOpenButton', 'keydown', event => {
+      if (event.key === 'Escape') stopFreezerEntrance();
+    });
     on('freezerEntrance', 'animationend', event => {
       if (event.target === event.currentTarget && event.animationName === 'freezer-reveal') stopFreezerEntrance();
     });
