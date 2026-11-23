@@ -21,6 +21,13 @@ const DELIVERY_MAX_CHARGE = 45;
 const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
 
+const cloudStore = window.freshAdatDatabase;
+let customerProfileOwner = null;
+let checkoutInProgress = false;
+let pendingOrderDraft = null;
+let endedOfferKeys = new Set();
+let offerAvailabilityLoaded = !cloudStore?.enabled;
+
 let products = [];
 let offers = [];
 let cart = {};
@@ -796,6 +803,25 @@ function updateLocationWarning(isValid) {
 }
 
 // ========== OFFERS TEASER ==========
+function getAvailableOffers() {
+  if (!offerAvailabilityLoaded) return [];
+  return offers.filter(offer => {
+    if (endedOfferKeys.has(offer.key)) return false;
+    const expires = Date.parse(offer.expiryDate || '');
+    return !Number.isFinite(expires) || expires > Date.now();
+  });
+}
+
+function getOrderOfferKeys(items) {
+  return [...new Set(getAvailableOffers().filter(offer =>
+    !offer.isSlide && offer.productId && items.some(item =>
+      item.product_id === offer.productId
+      && String(item.unit).trim().toLowerCase() === String(offer.unit).trim().toLowerCase()
+      && item.unit_price === offer.newPrice
+    )
+  ).map(offer => offer.key))];
+}
+
 function renderOffersTeaser() {
   const teaserSection = document.getElementById('offersTeaserSection');
   const scrollContainer = document.getElementById('offersTeaserScroll');
@@ -806,7 +832,7 @@ function renderOffersTeaser() {
     teaserSection.style.display = 'none';
     return;
   }
-  const teaserOffers = offers.filter(o => !o.isSlide);
+  const teaserOffers = getAvailableOffers().filter(o => !o.isSlide);
   if (!teaserOffers.length) {
     teaserSection.style.display = 'none';
     return;
@@ -874,13 +900,14 @@ function renderOffersPage() {
   productsGrid.classList.remove('block');
   productsGrid.style.display = 'block';
 
-  if (!offers.length) {
+  const availableOffers = getAvailableOffers();
+  if (!availableOffers.length) {
     productsGrid.innerHTML = `<div class="no-results" style="padding:40px;">✨ No offers available</div>`;
     return;
   }
 
-  const slideOffers = offers.filter(o => o.isSlide === true);
-  const cardOffers = offers.filter(o => !o.isSlide);
+  const slideOffers = availableOffers.filter(o => o.isSlide === true);
+  const cardOffers = availableOffers.filter(o => !o.isSlide);
 
   let html = '<div class="offers-page-container">';
 
@@ -969,6 +996,10 @@ function renderOffersPage() {
 
 // ========== OFFER MODAL ==========
 function showOfferDetailModal(offer) {
+  if (!getAvailableOffers().includes(offer)) {
+    showToast('This offer has ended.');
+    return;
+  }
   currentOffer = offer;
   const modal = document.getElementById('offerDetailModal');
   const contentDiv = document.getElementById('offerDetailContent');
@@ -1032,7 +1063,7 @@ function closeOfferModal() {
 }
 
 function addOfferToCart() {
-  if (currentOffer && currentOffer.productId) {
+  if (currentOffer?.productId && getAvailableOffers().includes(currentOffer)) {
     adjustQuantity(currentOffer.productId, 1, currentOffer.unit || '', 0);
     closeOfferModal();
   } else {
@@ -2093,6 +2124,7 @@ function initMap(initialLat = null, initialLng = null) {
 }
 
 function createMap(initialLat = null, initialLng = null) {
+  if (map) map.remove();
   const centerLat = (initialLat && initialLng) ? initialLat : ADAT_LAT;
   const centerLng = (initialLat && initialLng) ? initialLng : ADAT_LON;
 
@@ -2263,9 +2295,9 @@ async function showStep(step) {
   if (step === 4) {
     const fullAddr = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
     const confirmAddress = document.getElementById('confirmAddress');
-    if (confirmAddress) confirmAddress.innerHTML = `${fullAddr}<br>Type: ${customerData.addressType}`;
+    if (confirmAddress) confirmAddress.innerHTML = `${escapeHtml(fullAddr)}<br>Type: ${escapeHtml(customerData.addressType)}`;
     const confirmCustomer = document.getElementById('confirmCustomer');
-    if (confirmCustomer) confirmCustomer.innerHTML = `${customerData.name}<br>📞 ${customerData.phone}`;
+    if (confirmCustomer) confirmCustomer.innerHTML = `${escapeHtml(customerData.name)}<br>📞 ${escapeHtml(customerData.phone)}`;
     let subtotal = getCartSubtotal();
     const distance = await getDistanceFromStore();
     let deliveryCharge = getDeliveryCharge(subtotal, distance);
@@ -2297,41 +2329,90 @@ async function showStep(step) {
   }
 }
 
-function loadSavedCustomerData() {
-  const saved = localStorage.getItem('freshAdat_customer');
-  if (saved) {
-    try {
-      const data = JSON.parse(saved);
-      if (data.name) customerData.name = data.name;
-      if (data.phone) customerData.phone = data.phone;
-      if (data.location && data.location.lat) {
-        customerData.house = data.house || '';
-        customerData.area = data.area || '';
-        customerData.landmark = data.landmark || '';
-        customerData.addressType = data.addressType || 'Home';
-        customerData.location = data.location;
-        customerData.useEcoBox = data.useEcoBox || false;
-        customerData.preOrderDateTime = data.preOrderDateTime || null;
-        customerData.roadDistance = data.roadDistance || null;
-      }
-    } catch(e) {}
-  }
+function getLocalCustomerData() {
+  try { return JSON.parse(localStorage.getItem('freshAdat_customer')); } catch { return null; }
 }
 
-function saveCustomerData() {
-  const toSave = {
-    name: customerData.name,
-    phone: customerData.phone,
-    house: customerData.house,
-    area: customerData.area,
-    landmark: customerData.landmark,
-    addressType: customerData.addressType,
-    location: customerData.location,
-    useEcoBox: customerData.useEcoBox,
-    preOrderDateTime: customerData.preOrderDateTime,
-    roadDistance: customerData.roadDistance
+function resetCustomerData() {
+  customerData = {
+    name: '', phone: '', house: '', area: '', landmark: '', addressType: 'Home',
+    location: { lat: null, lng: null, address: '' },
+    useEcoBox: false, preOrderDateTime: null, roadDistance: null
   };
-  localStorage.setItem('freshAdat_customer', JSON.stringify(toSave));
+  customerProfileOwner = null;
+}
+
+function normalizeCloudCustomerData(details) {
+  const types = ['Home', 'Work', 'Other'];
+  const { lat, lng, address } = details?.location || {};
+  return {
+    name: String(details?.name ?? ''),
+    phone: String(details?.phone ?? ''),
+    house: String(details?.house ?? ''),
+    area: String(details?.area ?? ''),
+    landmark: String(details?.landmark ?? ''),
+    addressType: types.includes(details?.addressType) ? details.addressType : 'Home',
+    location: {
+      lat: Number.isFinite(lat) && Math.abs(lat) <= 90 ? lat : null,
+      lng: Number.isFinite(lng) && Math.abs(lng) <= 180 ? lng : null,
+      address: String(address ?? '')
+    },
+    useEcoBox: details?.useEcoBox === true,
+    preOrderDateTime: null,
+    roadDistance: null
+  };
+}
+
+async function loadSavedCustomerData() {
+  if (cloudStore?.enabled) {
+    resetCustomerData();
+    try {
+      const user = await cloudStore.getUser();
+      if (!user) {
+        closeCart();
+        openAccountModal();
+        showToast('Sign in with Google to continue.');
+        return false;
+      }
+      const details = await cloudStore.loadProfile(user.id);
+      customerData = normalizeCloudCustomerData(details);
+      customerProfileOwner = user.id;
+      return true;
+    } catch {
+      showToast('Could not load your account. Try again.');
+      return false;
+    }
+  }
+
+  const saved = getLocalCustomerData();
+  if (saved?.name) customerData.name = saved.name;
+  if (saved?.phone) customerData.phone = saved.phone;
+  if (saved?.location?.lat) Object.assign(customerData, saved);
+  return true;
+}
+
+async function saveCustomerData() {
+  if (cloudStore?.enabled) {
+    try {
+      const details = normalizeCloudCustomerData(customerData);
+      delete details.preOrderDateTime;
+      delete details.roadDistance;
+      await cloudStore.saveProfile(customerProfileOwner, details);
+    } catch {
+      showToast('Could not save your delivery details. Check your sign-in and try again.');
+      return false;
+    }
+  } else {
+    localStorage.setItem('freshAdat_customer', JSON.stringify(customerData));
+  }
+  return true;
+}
+
+async function saveAccountProfile() {
+  if (!(await saveCustomerData())) return;
+  closeAddressFlow();
+  openAccountModal();
+  showToast('Profile saved.');
 }
 
 async function showSavedSummary() {
@@ -2379,7 +2460,7 @@ async function showSavedSummary() {
     <div class="saved-customer-section">
       <h4><i class="fas fa-user"></i> Customer Details</h4>
       <p><strong>👤 Name:</strong> ${escapeHtml(customerData.name)}</p>
-      <p><strong>📞 Phone:</strong> ${customerData.phone}</p>
+      <p><strong>📞 Phone:</strong> ${escapeHtml(customerData.phone)}</p>
     </div>
     <div class="order-summary-section">
       <h4><i class="fas fa-shopping-cart"></i> Order Summary</h4>
@@ -2413,20 +2494,18 @@ function startMultiStepFlow() {
   const areaInput = document.getElementById('addrArea');
   const landmarkInput = document.getElementById('addrLandmark');
   const ecoCheckbox = document.getElementById('ecoBoxCheckbox');
-  if (customerData.house && houseInput) houseInput.value = customerData.house;
-  if (customerData.area && areaInput) areaInput.value = customerData.area;
-  if (customerData.landmark && landmarkInput) landmarkInput.value = customerData.landmark;
+  if (houseInput) houseInput.value = customerData.house;
+  if (areaInput) areaInput.value = customerData.area;
+  if (landmarkInput) landmarkInput.value = customerData.landmark;
   const radio = document.querySelector(`input[name="addrType"][value="${customerData.addressType}"]`);
   if (radio) radio.checked = true;
   if (ecoCheckbox) ecoCheckbox.checked = customerData.useEcoBox;
-  if (customerData.name) {
-    const nameInput = document.getElementById('custFullName');
-    const phoneInput = document.getElementById('custPhoneNumber');
-    const preview = document.getElementById('savedAddressPreview');
-    if (nameInput) nameInput.value = customerData.name;
-    if (phoneInput) phoneInput.value = customerData.phone;
-    if (preview) preview.innerHTML = `<strong>Saved address:</strong> ${customerData.house}, ${customerData.area}`;
-  }
+  const nameInput = document.getElementById('custFullName');
+  const phoneInput = document.getElementById('custPhoneNumber');
+  const preview = document.getElementById('savedAddressPreview');
+  if (nameInput) nameInput.value = customerData.name;
+  if (phoneInput) phoneInput.value = customerData.phone;
+  if (preview) preview.textContent = customerData.house ? 'Saved address: ' + customerData.house + ', ' + customerData.area : '';
   if (customerData.location && customerData.location.lat) {
     initMap(customerData.location.lat, customerData.location.lng);
   } else {
@@ -2434,8 +2513,7 @@ function startMultiStepFlow() {
   }
 }
 
-function openAddressFlow() {
-  if (stickyBar) stickyBar.style.display = 'none';
+async function openAddressFlow() {
   if (!isStoreOpen) {
     showToast("⚠️ Store is currently closed. You can pre‑order for later.");
   }
@@ -2444,12 +2522,14 @@ function openAddressFlow() {
     showToast("Cart is empty");
     return;
   }
+  if (!(await loadSavedCustomerData())) return;
   closeCart();
-  loadSavedCustomerData();
+  if (stickyBar) stickyBar.style.display = 'none';
+  document.getElementById('sendFromSummaryBtn').textContent = 'Confirm Order';
+  document.getElementById('sendWhatsAppFinalBtn').textContent = 'Continue to WhatsApp';
 
   if (cartPreOrderDateTime && !customerData.preOrderDateTime) {
     customerData.preOrderDateTime = cartPreOrderDateTime;
-    saveCustomerData();
   }
 
   const modal = document.getElementById('addressFlowModal');
@@ -2533,42 +2613,90 @@ function isMeatProduct(product) {
 }
 
 async function sendFinalWhatsApp() {
-  const subtotal = getCartSubtotal();
+  if (checkoutInProgress || !Object.keys(cart).length) return;
+  checkoutInProgress = true;
+  let handoff;
+  try {
+    if (cloudStore?.enabled) {
+      handoff = window.open('about:blank', '_blank');
+      if (handoff) handoff.opener = null;
+    }
+    await sendCheckoutToWhatsApp(handoff);
+  } catch {
+    handoff?.close();
+    showToast('Could not complete checkout. Your cart is still available. Try again.');
+  } finally {
+    checkoutInProgress = false;
+  }
+}
+
+async function sendCheckoutToWhatsApp(handoff) {
+  const owner = customerProfileOwner;
+  const details = structuredClone(customerData);
+  const orderCart = structuredClone(cart);
+  if (cloudStore?.enabled && (!owner || !details.name || !details.phone || !details.house ||
+      !Number.isFinite(details.location.lat) || !Number.isFinite(details.location.lng))) {
+    throw new Error('Checkout details are incomplete.');
+  }
+  const subtotal = Number(getCartSubtotal().toFixed(2));
   const distance = await getDistanceFromStore();
   const deliveryCharge = getDeliveryCharge(subtotal, distance);
-  const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
-  const total = subtotal + deliveryCharge + ecoCharge;
-  const fullAddress = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
-  const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
+  const ecoCharge = details.useEcoBox ? ECO_BOX_CHARGE : 0;
+  const total = Number((subtotal + deliveryCharge + ecoCharge).toFixed(2));
+  const fullAddress = `${details.house}, ${details.area}${details.landmark ? ', ' + details.landmark : ''}, ${details.location.address}`;
+  const mapLink = `https://maps.google.com/?q=${details.location.lat},${details.location.lng}`;
 
-  let itemLines = [];
+  const itemLines = [];
+  const orderItems = [];
   let hasMeat = false;
 
-  Object.keys(cart).forEach(key => {
-    const [productId, unit] = key.split('_');
+  for (const [key, item] of Object.entries(orderCart)) {
+    const separator = key.indexOf('_');
+    const productId = key.slice(0, separator);
+    const unit = item.unit || key.slice(separator + 1);
     const p = products.find(x => x.id == parseInt(productId));
-    if (!p) return;
-    const item = cart[key];
+    if (!p) continue;
     const price = item.price || 0;
     const qty = item.qty;
     const line = `🛒 ${p.name} (${unit}) × ${qty} = ₹${price * qty}`;
     itemLines.push(line);
+    orderItems.push({ product_id: p.id, name: p.name, unit, unit_price: price, quantity: qty });
     if (isMeatProduct(p)) hasMeat = true;
-  });
+  }
 
-  const orderId = 'ORD' + Date.now().toString().slice(-6);
+  if (!orderItems.length) throw new Error('The cart is empty.');
+  let orderId = 'ORD' + Date.now().toString().slice(-6);
+  if (cloudStore?.enabled) {
+    const profile = normalizeCloudCustomerData(details);
+    delete profile.preOrderDateTime;
+    delete profile.roadDistance;
+    const order = {
+      customer: { ...profile, scheduled_delivery: details.preOrderDateTime },
+      items: orderItems,
+      offer_keys: getOrderOfferKeys(orderItems),
+      subtotal, delivery_charge: deliveryCharge, eco_box_charge: ecoCharge, total
+    };
+    const signature = JSON.stringify([owner, order]);
+    if (pendingOrderDraft?.signature !== signature) {
+      pendingOrderDraft = { signature, id: crypto.randomUUID() };
+    }
+    orderId = pendingOrderDraft.id;
+    await cloudStore.saveProfile(owner, profile);
+    await cloudStore.saveOrder(owner, { id: orderId, ...order });
+  }
 
   let msg = `🌿 *FRESH ADAT ORDER* 🌿\n`;
   msg += `━━━━━━━━━━━━━━━━━━\n`;
   msg += `🆔 *Order ID:* ${orderId}\n`;
-  msg += `👤 *Customer:* ${customerData.name}\n`;
-  msg += `📞 *Phone:* ${customerData.phone}\n`;
+  msg += `👤 *Customer:* ${details.name}\n`;
+  msg += `📞 *Phone:* ${details.phone}\n`;
   msg += `📍 *Address:* ${fullAddress}\n`;
-  msg += `🏷️ *Type:* ${customerData.addressType}\n`;
+  msg += `🏷️ *Type:* ${details.addressType}\n`;
   msg += `🗺️ *Map:* ${mapLink}\n\n`;
 
   msg += `🛍️ *Items:*\n`;
   msg += itemLines.join('\n') + '\n\n';
+  if (details.preOrderDateTime) msg += 'Scheduled delivery: ' + new Date(details.preOrderDateTime).toLocaleString() + '\n';
 
   msg += `🚚 *Delivery charge:* ₹${deliveryCharge}\n`;
   msg += `💰 *Subtotal:* ₹${subtotal}\n`;
@@ -2585,53 +2713,83 @@ async function sendFinalWhatsApp() {
   msg += `♻️ Please return the empty box after delivery\n`;
   msg += `📝 Note: Thank you for ordering with Fresh Adat!`;
 
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
+  const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
+  if (!cloudStore?.enabled) window.open(whatsappUrl, '_blank');
+  else if (handoff && !handoff.closed) handoff.location.href = whatsappUrl;
   cart = {};
   saveCart(cart);
   updateCartCountUI();
   renderProducts();
   updateStickyCartBar();
   closeAddressFlow();
-  showToast('✅ Order sent! We will process it shortly.');
+  showToast('Send your order in WhatsApp to request confirmation.');
+  if (cloudStore?.enabled && (!handoff || handoff.closed)) window.location.assign(whatsappUrl);
+  pendingOrderDraft = null;
 }
 
 // ========== ACCOUNT MODAL ==========
-function getUserDetails() {
-  try { return JSON.parse(localStorage.getItem('freshAdatUserDetails')) || null; } catch { return null; }
+async function showCloudOrderHistory(account) {
+  try {
+    const orders = await cloudStore.listOrders(account.id);
+    if ((await cloudStore.getUser())?.id !== account.id) return;
+    const statusLabels = {
+      awaiting_confirmation: 'Awaiting store confirmation',
+      confirmed: 'Confirmed',
+      completed: 'Completed',
+      cancelled: 'Cancelled'
+    };
+    const content = orders.map(order => {
+      const date = new Date(order.created_at).toLocaleDateString();
+      const status = statusLabels[order.status] || 'Order received';
+      const promotion = order.offer_keys?.length ? '<p>Includes an offer</p>' : '';
+      return `<div class="faq-item">
+        <strong>${escapeHtml(date)} · ₹${Number(order.total).toFixed(2)}</strong>
+        <p>${escapeHtml(status)}</p>
+        ${promotion}
+        <small>${escapeHtml(order.id)}</small>
+      </div>`;
+    }).join('');
+    showStaticContent('Order History', content || '<p>No orders yet.</p>');
+  } catch {
+    showToast('Could not load your orders. Try again.');
+  }
 }
 
-function saveUserDetails(details) {
-  localStorage.setItem('freshAdatUserDetails', JSON.stringify(details));
-}
-
-function clearUserDetails() {
-  localStorage.removeItem('freshAdatUserDetails');
-}
-
-function renderAccountModal() {
+async function renderAccountModal() {
   const body = document.getElementById('accountModalBody');
   if (!body) return;
 
-  const saved = localStorage.getItem('freshAdat_customer');
-  let user = null;
-  if (saved) {
-    try { user = JSON.parse(saved); } catch(e) {}
+  let account = null;
+  let user;
+  if (cloudStore?.enabled) {
+    body.textContent = 'Loading your account…';
+    try {
+      account = await cloudStore.getUser();
+      user = account ? normalizeCloudCustomerData(await cloudStore.loadProfile(account.id)) : null;
+    } catch {
+      body.innerHTML = '<button class="login-btn" type="button" id="retryCloudAccount">Retry loading account</button>';
+      document.getElementById('retryCloudAccount').addEventListener('click', renderAccountModal);
+      return;
+    }
+  } else {
+    user = getLocalCustomerData();
   }
 
-  if (user && user.name && user.phone && user.location && user.house) {
+  if (account || (user && user.name && user.phone && user.location && user.house)) {
     const fullAddress = `${user.house}, ${user.area ? user.area + ', ' : ''}${user.landmark ? user.landmark + ', ' : ''}${user.location.address || ''}`;
     const cleanAddress = fullAddress.replace(/, ,/g, ',').replace(/,\s*,/g, ',').replace(/,\s*$/, '');
 
     body.innerHTML = `
       <div class="user-info">
         <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
-        <div class="user-name">${escapeHtml(user.name)}</div>
-        <div class="user-detail"><i class="fas fa-phone"></i> ${escapeHtml(user.phone)}</div>
-        <div class="user-address">📍 ${escapeHtml(cleanAddress)}</div>
-        <div class="user-detail"><i class="fas fa-envelope"></i> fresh4adat@gmail.com</div>
+        <div class="user-name">${escapeHtml(user.name || account?.email || 'Your account')}</div>
+        ${user.phone ? `<div class="user-detail"><i class="fas fa-phone"></i> ${escapeHtml(user.phone)}</div>` : ''}
+        ${cleanAddress ? `<div class="user-address">📍 ${escapeHtml(cleanAddress)}</div>` : ''}
+        <div class="user-detail"><i class="fas fa-envelope"></i> ${escapeHtml(account?.email || 'fresh4adat@gmail.com')}</div>
         <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-edit"></i> Edit Profile</button>
       </div>
       <div class="account-menu">
+        ${account ? '<button class="menu-item" type="button" id="cloudOrdersBtn"><i class="fas fa-receipt"></i><span>Order History</span></button>' : ''}
         <div class="menu-item" id="contactUsBtnLogged"><i class="fas fa-headset"></i><span>Contact Us</span><i class="fas fa-chevron-right"></i></div>
         <div class="menu-item" id="downloadAppBtnLogged"><i class="fas fa-download"></i><span>Download App</span><i class="fas fa-chevron-right"></i></div>
         <div class="menu-item" id="faqsBtnLogged"><i class="fas fa-question-circle"></i><span>FAQs</span><i class="fas fa-chevron-right"></i></div>
@@ -2642,6 +2800,7 @@ function renderAccountModal() {
       </div>
     `;
 
+    document.getElementById('cloudOrdersBtn')?.addEventListener('click', () => showCloudOrderHistory(account));
     document.getElementById('editProfileBtn')?.addEventListener('click', () => {
       closeAccountModalFunc();
       openAddressFlowForLogin();
@@ -2677,13 +2836,13 @@ function renderAccountModal() {
         <p><strong>3. Payment</strong><br>Payments are accepted via cash on delivery, Google Pay, PhonePe, Paytm.</p>
         <p><strong>4. Returns & Refunds</strong><br>Quality issues must be reported within 2 hours of delivery.</p>
         <p><strong>5. Eco-Box</strong><br>Eco-boxes are reusable. Failure to return may incur additional charges.</p>
-        <p><strong>6. Privacy</strong><br>Your data is safe and never shared with third parties.</p>
+        <p><strong>6. Privacy</strong><br>Your delivery details are used to process and deliver your order.</p>
       `);
     });
     document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
       showStaticContent('Privacy Policy', `
         <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
-        <p><strong>Data Security</strong><br>Your data is stored securely and not shared with third parties.</p>
+        <p><strong>Data Security</strong><br> ${cloudStore?.enabled ? 'Google verifies your account. Supabase stores your delivery profile and orders. When you send an order through WhatsApp, the shop receives your contact and delivery details.' : 'The site saves your delivery details in this browser. When you send an order through WhatsApp, the shop receives your contact and delivery details.'}</p>
         <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
         <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
       `);
@@ -2698,15 +2857,18 @@ function renderAccountModal() {
         <p><strong>Email:</strong> fresh4adat@gmail.com</p>
       `);
     });
-    document.getElementById('logoutBtn')?.addEventListener('click', () => {
-      localStorage.removeItem('freshAdat_customer');
-      customerData = {
-        name: '', phone: '', location: { lat: null, lng: null, address: '' },
-        house: '', area: '', landmark: '', addressType: 'Home', useEcoBox: false,
-        preOrderDateTime: null
-      };
+    document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+      if (cloudStore?.enabled) {
+        try { await cloudStore.signOut(); }
+        catch { showToast('Could not sign out. Try again.'); return; }
+        pendingOrderDraft = null;
+        closeAddressFlow();
+      } else {
+        localStorage.removeItem('freshAdat_customer');
+      }
+      resetCustomerData();
       renderAccountModal();
-      showToast('👋 Logged out successfully');
+      showToast('Signed out.');
     });
     return;
   }
@@ -2715,9 +2877,9 @@ function renderAccountModal() {
     <div class="guest-section">
       <div class="guest-icon"><i class="fas fa-user-circle"></i></div>
       <h2>Hi, Guest</h2>
-      <p>Please Login to enjoy your shopping</p>
+      <p>${cloudStore?.enabled ? 'Sign in to save your delivery details and see your orders.' : 'Save your delivery details for faster checkout.'}</p>
       <p><i class="fas fa-envelope"></i> fresh4adat@gmail.com</p>
-      <button id="accountLoginBtn" class="login-btn"><i class="fas fa-sign-in-alt"></i> Login</button>
+      <button id="accountLoginBtn" class="login-btn"><i class="fas fa-sign-in-alt"></i> ${cloudStore?.enabled ? 'Continue with Google' : 'Save delivery details'}</button>
     </div>
     <div class="account-menu">
       <div class="menu-item" id="contactUsBtnGuest"><i class="fas fa-headset"></i><span>Contact Us</span><i class="fas fa-chevron-right"></i></div>
@@ -2728,9 +2890,19 @@ function renderAccountModal() {
     </div>
   `;
 
-  document.getElementById('accountLoginBtn')?.addEventListener('click', () => {
-    closeAccountModalFunc();
-    openAddressFlowForLogin();
+  document.getElementById('accountLoginBtn')?.addEventListener('click', async event => {
+    if (cloudStore?.enabled) {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try { await cloudStore.signIn(); }
+      catch {
+        button.disabled = false;
+        showToast(location.protocol === 'file:' ? 'Open the hosted Fresh Adat website to sign in.' : 'Could not start Google sign-in. Try again.');
+      }
+    } else {
+      closeAccountModalFunc();
+      openAddressFlowForLogin();
+    }
   });
   document.getElementById('contactUsBtnGuest')?.addEventListener('click', () => {
     showStaticContent('Contact Us', `
@@ -2763,13 +2935,13 @@ function renderAccountModal() {
       <p><strong>3. Payment</strong><br>Payments are accepted via cash on delivery, Google Pay, PhonePe, Paytm.</p>
       <p><strong>4. Returns & Refunds</strong><br>Quality issues must be reported within 2 hours of delivery.</p>
       <p><strong>5. Eco-Box</strong><br>Eco-boxes are reusable. Failure to return may incur additional charges.</p>
-      <p><strong>6. Privacy</strong><br>Your data is safe and never shared with third parties.</p>
+      <p><strong>6. Privacy</strong><br>Your delivery details are used to process and deliver your order.</p>
     `);
   });
   document.getElementById('privacyBtnGuest')?.addEventListener('click', () => {
     showStaticContent('Privacy Policy', `
       <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
-      <p><strong>Data Security</strong><br>Your data is stored securely and not shared with third parties.</p>
+      <p><strong>Data Security</strong><br> ${cloudStore?.enabled ? 'Google verifies your account. Supabase stores your delivery profile and orders. When you send an order through WhatsApp, the shop receives your contact and delivery details.' : 'The site saves your delivery details in this browser. When you send an order through WhatsApp, the shop receives your contact and delivery details.'}</p>
       <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
       <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
     `);
@@ -2789,59 +2961,12 @@ function closeAccountModalFunc() {
   if (modal) modal.style.display = 'none';
 }
 
-function openAddressFlowForLogin() {
+async function openAddressFlowForLogin() {
+  if (!(await loadSavedCustomerData())) return;
   isLoginMode = true;
-  loadSavedCustomerData();
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'flex';
-  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location && customerData.location.lat;
-  if (hasSavedData) {
-    showSavedSummary();
-    const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
-    if (sendSummaryBtn) {
-      sendSummaryBtn.textContent = '💾 Save Profile';
-      sendSummaryBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
-      sendSummaryBtn.onclick = () => {
-        saveCustomerData();
-        closeAddressFlow();
-        renderAccountModal();
-        showToast('✅ Profile saved');
-      };
-    }
-  } else {
-    startMultiStepFlow();
-    const finalSendBtn = document.getElementById('sendWhatsAppFinalBtn');
-    if (finalSendBtn) {
-      finalSendBtn.textContent = '💾 Save Profile';
-      finalSendBtn.innerHTML = '<i class="fas fa-save"></i> Save Profile';
-      finalSendBtn.onclick = () => {
-        const house = document.getElementById('addrHouse')?.value.trim() || '';
-        const area = document.getElementById('addrArea')?.value.trim() || '';
-        const landmark = document.getElementById('addrLandmark')?.value.trim() || '';
-        const name = document.getElementById('custFullName')?.value.trim() || '';
-        const phone = document.getElementById('custPhoneNumber')?.value.trim() || '';
-        const selectedType = document.querySelector('input[name="addrType"]:checked')?.value || 'Home';
-        const useEco = document.getElementById('ecoBoxCheckbox')?.checked || false;
-
-        customerData.house = house;
-        customerData.area = area;
-        customerData.landmark = landmark;
-        customerData.name = name;
-        customerData.phone = phone;
-        customerData.addressType = selectedType;
-        customerData.useEcoBox = useEco;
-        if (!customerData.location.lat) {
-          showToast("Please set your delivery location on the map first");
-          showStep(1);
-          return;
-        }
-        saveCustomerData();
-        closeAddressFlow();
-        renderAccountModal();
-        showToast('✅ Profile saved');
-      };
-    }
-  }
+  startMultiStepFlow();
 }
 
 function showStaticContent(title, content) {
@@ -3085,6 +3210,7 @@ function loadProductsAndOffers(baseUrl) {
         const isSlide = row.is_slide && row.is_slide.toString().toLowerCase() === 'true';
         return {
           id: idx,
+          key: String(row.offer_key || [row.offer_name, row.offer_unit, row.expiry_date].filter(Boolean).join('|')).trim().toLowerCase(),
           name: row.offer_name || 'Special Offer',
           unit: row.offer_unit || '1 pc',
           oldPrice: Number(row.offer_old_price) || 0,
@@ -3094,7 +3220,7 @@ function loadProductsAndOffers(baseUrl) {
           productId: Number(row.product_id) || null,
           isSlide: isSlide,
           slideImageUrl: isSlide ? (row.slide_image_url || '') : '',
-          imageUrl: row.image_url || getImageUrl(row.offer_name),
+          imageUrl: row.image_url || getImageUrl(row.offer_name || 'offers'),
           description: row.description || '',
           highlight: row.highlight || '',
           othr_img: row.othr_img || ''
@@ -3213,7 +3339,7 @@ function initAddressFlow() {
     showStep(3);
   });
 
-  on('nextToConfirmBtn', 'click', () => {
+  on('nextToConfirmBtn', 'click', async () => {
     const name = document.getElementById('custFullName');
     const phone = document.getElementById('custPhoneNumber');
     if (!name || !name.value.trim() || !phone || !phone.value.trim()) {
@@ -3222,79 +3348,17 @@ function initAddressFlow() {
     }
     customerData.name = name.value.trim();
     customerData.phone = phone.value.trim();
-    saveCustomerData();
+    if (!isLoginMode && !cloudStore?.enabled && !(await saveCustomerData())) return;
+    document.getElementById('sendWhatsAppFinalBtn').textContent = isLoginMode ? 'Save Profile' : 'Continue to WhatsApp';
     showStep(4);
   });
 
-  const finalSendBtn = document.getElementById('sendWhatsAppFinalBtn');
-  if (finalSendBtn) {
-    finalSendBtn.addEventListener('click', function() {
-      if (isLoginMode) {
-        const house = document.getElementById('addrHouse')?.value.trim() || '';
-        const area = document.getElementById('addrArea')?.value.trim() || '';
-        const landmark = document.getElementById('addrLandmark')?.value.trim() || '';
-        const name = document.getElementById('custFullName')?.value.trim() || '';
-        const phone = document.getElementById('custPhoneNumber')?.value.trim() || '';
-        const selectedType = document.querySelector('input[name="addrType"]:checked')?.value || 'Home';
-        const useEco = document.getElementById('ecoBoxCheckbox')?.checked || false;
-
-        customerData.house = house;
-        customerData.area = area;
-        customerData.landmark = landmark;
-        customerData.name = name;
-        customerData.phone = phone;
-        customerData.addressType = selectedType;
-        customerData.useEcoBox = useEco;
-        if (!customerData.location.lat) {
-          showToast("Please set your delivery location on the map first");
-          showStep(1);
-          return;
-        }
-        saveCustomerData();
-        closeAddressFlow();
-        renderAccountModal();
-        showToast('✅ Profile saved');
-      } else {
-        sendFinalWhatsApp();
-      }
-    });
-  }
-
-  const editBtn = document.getElementById('editAddressBtn');
-  if (editBtn) editBtn.addEventListener('click', startMultiStepFlow);
-
-  const sendSummaryBtn = document.getElementById('sendFromSummaryBtn');
-  if (sendSummaryBtn) {
-    sendSummaryBtn.addEventListener('click', function() {
-      if (isLoginMode) {
-        saveCustomerData();
-        closeAddressFlow();
-        renderAccountModal();
-        showToast('✅ Profile saved');
-      } else {
-        sendOrderFromSummary();
-      }
-    });
-
-    function updateSummaryButtonText() {
-      if (sendSummaryBtn) {
-        sendSummaryBtn.innerHTML = isLoginMode ? '<i class="fas fa-save"></i> Save Profile' : '<i class="fas fa-check"></i> Confirm Order';
-      }
-    }
-    setTimeout(updateSummaryButtonText, 100);
-    const origOpenAddressFlow = openAddressFlow;
-    openAddressFlow = function() {
-      isLoginMode = false;
-      origOpenAddressFlow.call(this);
-      setTimeout(updateSummaryButtonText, 200);
-    };
-    const origOpenAddressFlowForLogin = openAddressFlowForLogin;
-    openAddressFlowForLogin = function() {
-      isLoginMode = true;
-      origOpenAddressFlowForLogin.call(this);
-      setTimeout(updateSummaryButtonText, 200);
-    };
-  }
+  on('sendWhatsAppFinalBtn', 'click', () => {
+    if (isLoginMode) saveAccountProfile();
+    else sendFinalWhatsApp();
+  });
+  on('editAddressBtn', 'click', startMultiStepFlow);
+  on('sendFromSummaryBtn', 'click', sendOrderFromSummary);
 
   on('useMyLocationBtn', 'click', useCurrentLocation);
 
@@ -3427,6 +3491,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (labelSpan) labelSpan.textContent = MAX_DISTANCE_KM;
     }
 
+    if (cloudStore?.enabled) {
+      cloudStore.endedOfferKeys().then(keys => {
+        endedOfferKeys = keys;
+        offerAvailabilityLoaded = true;
+        if (selectedCat === 'Offers') renderProducts();
+      }).catch(() => {});
+    }
     setupGlobalListeners();
     initSearchListeners();
     initAddressFlow();
