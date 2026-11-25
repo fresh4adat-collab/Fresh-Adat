@@ -22,7 +22,16 @@ const PENDING_ORDER_KEY = 'freshadat_pending_order';
 const PENDING_BANNER_SEEN_KEY = 'pending_banner_seen';
 
 const cloudStore = window.freshAdatDatabase;
+const isFilePreview = location.protocol === 'file:';
+const googleSignInLabel = isFilePreview ? 'Open live site for Google sign-in' : 'Continue with Google';
+const mobileAuthReturnKey = 'freshAdat_mobile_auth_return';
+
 let customerProfileOwner = null;
+let profileCheckoutPending = false;
+let profilePhoneLocked = false;
+let savingCustomerProfile = false;
+let openingCheckout = false;
+let orderReviewVersion = 0;
 let checkoutInProgress = false;
 let pendingOrderDraft = null;
 let endedOfferKeys = new Set();
@@ -301,7 +310,7 @@ function getEffectivePrice(product, unitIndex) {
   return getProductPrice(product, unitIndex);
 }
 
-function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex) {
+function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex, offer = null) {
   const product = products.find(p => p.id == productId);
   if (!product) return;
   if (product.qty === 0) {
@@ -312,9 +321,17 @@ function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex) {
   const units = getProductUnits(product);
   const unitIndex = (selectedUnitIndex !== undefined && selectedUnitIndex < units.length) ? selectedUnitIndex : 0;
   const unit = selectedUnit || units[unitIndex] || product.unit || 'unit';
-  const price = getEffectivePrice(product, unitIndex);
+  const price = offer?.newPrice ?? getEffectivePrice(product, unitIndex);
 
   const cartKey = `${productId}_${unit}`;
+  if (delta > 0 && cart[cartKey]?.offerKey) {
+    showToast('You can add one unit with this offer.');
+    return;
+  }
+  if (offer && cart[cartKey]?.qty) {
+    showToast('Remove this item from the cart before adding it at the offer price.');
+    return;
+  }
   if (!cart[cartKey]) {
     cart[cartKey] = { qty: 0, unit: unit, price: price };
   }
@@ -329,6 +346,7 @@ function adjustQuantity(productId, delta, selectedUnit, selectedUnitIndex) {
   } else {
     cart[cartKey].qty = newQty;
     cart[cartKey].price = price;
+    if (offer) cart[cartKey].offerKey = offer.key;
   }
 
   saveCart(cart);
@@ -644,7 +662,7 @@ function handleDetailAddClick(e) {
 }
 
 // ========== PRODUCT CARD CREATION ==========
-function createProductCard(p, showQtyControls = true) {
+function createProductCard(p, showQtyControls = true, offerId = null) {
   const units = getProductUnits(p);
   const defaultUnit = units[0] || p.unit || 'unit';
   const defaultPrice = getEffectivePrice(p, 0);
@@ -672,11 +690,13 @@ function createProductCard(p, showQtyControls = true) {
     priceHtml = `<div class="single-price">₹${defaultPrice}</div>`;
   }
 
-  let cardHtml = `<div class="product-card" data-product-id="${p.id}" data-name="${escapeHtml(p.name)}">`;
+  let cardHtml = `<div class="product-card" data-product-id="${p.id}" ${offerId !== null ? `data-offer-id="${offerId}"` : ''} data-name="${escapeHtml(p.name)}">`;
   cardHtml += imgHtml;
   cardHtml += `<div class="product-info"><div class="product-name">${escapeHtml(p.name)}</div><div class="product-unit">${escapeHtml(defaultUnit)}${hasMultipleUnits ? ' <span class="unit-multiple-indicator">▼ ' + units.length + ' sizes</span>' : ''}</div>${priceHtml}`;
 
-  if (isOutOfStock) {
+  if (offerId !== null) {
+    cardHtml += `<button type="button" class="add-button" data-offer-id="${offerId}">View offer</button>`;
+  } else if (isOutOfStock) {
     if (!hasQty || !showQtyControls) {
       cardHtml += `<button class="add-button disabled" disabled data-id="${p.id}" data-unit="${defaultUnit}"><i class="fas fa-plus"></i> Add</button>`;
     } else {
@@ -695,6 +715,12 @@ function createProductCard(p, showQtyControls = true) {
 function setupGlobalListeners() {
   document.addEventListener('click', function(e) {
     const btn = e.target.closest('button');
+    const offerCard = e.target.closest('[data-offer-id]');
+    if (offerCard) {
+      const offer = offers.find(item => item.id === Number(offerCard.dataset.offerId));
+      if (offer) showOfferDetailModal(offer);
+      return;
+    }
     if (btn) {
       if (btn.classList.contains('add-button') && !btn.disabled) {
         e.preventDefault();
@@ -810,16 +836,6 @@ function getAvailableOffers() {
     const expires = Date.parse(offer.expiryDate || '');
     return !Number.isFinite(expires) || expires > Date.now();
   });
-}
-
-function getOrderOfferKeys(items) {
-  return [...new Set(getAvailableOffers().filter(offer =>
-    !offer.isSlide && offer.productId && items.some(item =>
-      item.product_id === offer.productId
-      && String(item.unit).trim().toLowerCase() === String(offer.unit).trim().toLowerCase()
-      && item.unit_price === offer.newPrice
-    )
-  ).map(offer => offer.key))];
 }
 
 function renderOffersTeaser() {
@@ -961,7 +977,7 @@ function renderOffersPage() {
         prices: [offer.oldPrice],
         discountPrices: [offer.newPrice]
       };
-      html += createProductCard(fakeProduct, true);
+      html += createProductCard(fakeProduct, true, offer.id);
     });
     html += `</div>`;
   }
@@ -1062,13 +1078,46 @@ function closeOfferModal() {
   currentOffer = null;
 }
 
-function addOfferToCart() {
-  if (currentOffer?.productId && getAvailableOffers().includes(currentOffer)) {
-    adjustQuantity(currentOffer.productId, 1, currentOffer.unit || '', 0);
-    closeOfferModal();
-  } else {
-    showToast("Product not found for this offer");
+async function applyLimitedOffer(offer) {
+  const product = products.find(item => item.id === offer.productId);
+  if (!product || !getAvailableOffers().includes(offer) || !(offer.newPrice > 0)) {
+    showToast('This offer is unavailable.');
+    return;
   }
+  if (!cloudStore?.enabled) {
+    showToast('Offer verification is unavailable.');
+    return;
+  }
+
+  try {
+    const user = await cloudStore.getUser();
+    if (!user?.phone_confirmed_at) {
+      showToast('This offer requires a verified mobile number. SMS verification is currently unavailable.');
+      return;
+    }
+    const status = await cloudStore.checkOffer(user.id, offer.key);
+    if (status === 'phone_required') {
+      showToast('This offer requires a verified mobile number.');
+    } else if (status === 'used') {
+      showToast('This offer has already been used by your mobile number.');
+    } else if (status === 'available') {
+      const units = getProductUnits(product);
+      const index = units.findIndex(unit => unit.toLowerCase() === String(offer.unit).trim().toLowerCase());
+      const unit = units[index] || String(offer.unit || units[0] || product.unit || 'unit').trim();
+      adjustQuantity(product.id, 1, unit, Math.max(index, 0), offer);
+    } else {
+      showToast('This offer is unavailable.');
+    }
+  } catch {
+    showToast('Could not verify this offer. Try again.');
+  }
+}
+
+function addOfferToCart() {
+  const offer = currentOffer;
+  if (!offer) return;
+  closeOfferModal();
+  applyLimitedOffer(offer);
 }
 
 // ========== HOMEPAGE LAYOUT ==========
@@ -2363,20 +2412,23 @@ function normalizeCloudCustomerData(details) {
   };
 }
 
+function applyCustomerProfile(account, details) {
+  customerData = normalizeCloudCustomerData(details);
+  if (!customerData.phone) customerData.phone = getAccountContactPhone(account);
+  customerProfileOwner = account.id;
+}
+
+function hasDeliveryProfile(details) {
+  return Boolean(details.name && details.phone && details.house
+    && Number.isFinite(details.location?.lat) && Number.isFinite(details.location?.lng));
+}
+
 async function loadSavedCustomerData() {
   if (cloudStore?.enabled) {
     resetCustomerData();
     try {
       const user = await cloudStore.getUser();
-      if (!user) {
-        closeCart();
-        openAccountModal();
-        showToast('Sign in with Google to continue.');
-        return false;
-      }
-      const details = await cloudStore.loadProfile(user.id);
-      customerData = normalizeCloudCustomerData(details);
-      customerProfileOwner = user.id;
+      if (user) applyCustomerProfile(user, await cloudStore.loadProfile(user.id));
       return true;
     } catch {
       showToast('Could not load your account. Try again.');
@@ -2409,19 +2461,40 @@ async function saveCustomerData() {
 }
 
 async function saveAccountProfile() {
-  if (!(await saveCustomerData())) return;
-  closeAddressFlow();
-  openAccountModal();
-  showToast('Profile saved.');
+  if (savingCustomerProfile) return;
+  const button = document.getElementById('nextToConfirmBtn');
+  const returnToCheckout = profileCheckoutPending;
+  savingCustomerProfile = true;
+  button.disabled = true;
+  button.textContent = 'Saving delivery details…';
+  try {
+    if (!(await saveCustomerData())) return;
+    if (returnToCheckout && Object.keys(cart).length) {
+      showCheckoutReview();
+    } else {
+      closeAddressFlow();
+      openAccountModal();
+    }
+    showToast('Delivery details saved.');
+  } finally {
+    savingCustomerProfile = false;
+    button.disabled = false;
+    button.textContent = isLoginMode ? 'Save delivery details' : 'Review order';
+  }
 }
 
 async function showSavedSummary() {
+  const version = ++orderReviewVersion;
   const stepIndicator = document.getElementById('stepIndicator');
   const multiStep = document.getElementById('multiStepContent');
   const savedCard = document.getElementById('savedSummaryCard');
+  const detailsDiv = document.getElementById('savedSummaryDetails');
+  const sendButton = document.getElementById('sendFromSummaryBtn');
   if (stepIndicator) stepIndicator.style.display = 'none';
   if (multiStep) multiStep.style.display = 'none';
   if (savedCard) savedCard.style.display = 'block';
+  detailsDiv.textContent = 'Preparing your order…';
+  sendButton.disabled = true;
 
   const fullAddr = `${customerData.house}, ${customerData.area}${customerData.landmark ? ', ' + customerData.landmark : ''}, ${customerData.location.address}`;
   const mapLink = `https://maps.google.com/?q=${customerData.location.lat},${customerData.location.lng}`;
@@ -2429,6 +2502,7 @@ async function showSavedSummary() {
   const subtotal = getCartSubtotal();
   const totalSavings = getCartTotalSavings();
   const distance = await getDistanceFromStore();
+  if (version !== orderReviewVersion) return;
   const deliveryCharge = getDeliveryCharge(subtotal, distance);
   const ecoCharge = customerData.useEcoBox ? ECO_BOX_CHARGE : 0;
   const total = subtotal + deliveryCharge + ecoCharge;
@@ -2477,15 +2551,18 @@ async function showSavedSummary() {
       ✅ Delivered in reusable eco‑box<br>♻️ Please return the empty box after delivery
     </div>
   `;
-  const detailsDiv = document.getElementById('savedSummaryDetails');
-  if (detailsDiv) detailsDiv.innerHTML = summaryHtml;
+  detailsDiv.innerHTML = summaryHtml;
+  sendButton.disabled = false;
 }
 
 function startMultiStepFlow() {
+  orderReviewVersion++;
   const stepIndicator = document.getElementById('stepIndicator');
   const multiStep = document.getElementById('multiStepContent');
   const savedCard = document.getElementById('savedSummaryCard');
   if (stepIndicator) stepIndicator.style.display = 'flex';
+  const confirmStep = stepIndicator?.querySelector('[data-step="4"]');
+  if (confirmStep) confirmStep.style.display = isLoginMode ? 'none' : '';
   if (multiStep) multiStep.style.display = 'block';
   if (savedCard) savedCard.style.display = 'none';
   currentStep = 1;
@@ -2504,7 +2581,11 @@ function startMultiStepFlow() {
   const phoneInput = document.getElementById('custPhoneNumber');
   const preview = document.getElementById('savedAddressPreview');
   if (nameInput) nameInput.value = customerData.name;
-  if (phoneInput) phoneInput.value = customerData.phone;
+  if (phoneInput) {
+    phoneInput.value = customerData.phone;
+    phoneInput.readOnly = profilePhoneLocked;
+  }
+  document.getElementById('nextToConfirmBtn').textContent = isLoginMode ? 'Save delivery details' : 'Review order';
   if (preview) preview.textContent = customerData.house ? 'Saved address: ' + customerData.house + ', ' + customerData.area : '';
   if (customerData.location && customerData.location.lat) {
     initMap(customerData.location.lat, customerData.location.lng);
@@ -2514,18 +2595,36 @@ function startMultiStepFlow() {
 }
 
 async function openAddressFlow() {
+  if (openingCheckout) return;
   if (!isStoreOpen) {
     showToast("⚠️ Store is currently closed. You can pre‑order for later.");
   }
-  isLoginMode = false;
   if (Object.keys(cart).length === 0) {
     showToast("Cart is empty");
     return;
   }
-  if (!(await loadSavedCustomerData())) return;
+  openingCheckout = true;
+  try {
+    if (!(await loadSavedCustomerData())) return;
+    if (cloudStore?.enabled && !customerProfileOwner) {
+      openPhoneAuth('signup', true);
+    } else if (cloudStore?.enabled && !hasDeliveryProfile(customerData)) {
+      openDeliveryProfile(true, Boolean(customerData.phone));
+    } else {
+      showCheckoutReview();
+    }
+  } finally {
+    openingCheckout = false;
+  }
+}
+
+function showCheckoutReview() {
+  isLoginMode = false;
+  profileCheckoutPending = false;
+  profilePhoneLocked = false;
   closeCart();
   if (stickyBar) stickyBar.style.display = 'none';
-  document.getElementById('sendFromSummaryBtn').textContent = 'Confirm Order';
+  document.getElementById('sendFromSummaryBtn').textContent = 'Send order on WhatsApp';
   document.getElementById('sendWhatsAppFinalBtn').textContent = 'Continue to WhatsApp';
 
   if (cartPreOrderDateTime && !customerData.preOrderDateTime) {
@@ -2534,8 +2633,7 @@ async function openAddressFlow() {
 
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'flex';
-  const hasSavedData = customerData.name && customerData.phone && customerData.house && customerData.location && customerData.location.lat;
-  if (hasSavedData) {
+  if (hasDeliveryProfile(customerData)) {
     const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
     if (distance <= MAX_DISTANCE_KM) {
       showSavedSummary();
@@ -2551,6 +2649,9 @@ async function openAddressFlow() {
 }
 
 function closeAddressFlow() {
+  orderReviewVersion++;
+  profileCheckoutPending = false;
+  profilePhoneLocked = false;
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'none';
   hideLoadingOverlay();
@@ -2583,13 +2684,11 @@ function sendOrderFromSummary() {
   const isOpen = isStoreOpenNow();
   if (!isOpen && !customerData.preOrderDateTime) {
     showToast('❌ Store is closed now. Please select a future delivery time (pre‑order).');
-    showStep(3);
     return;
   }
   const distance = getDistanceKm(ADAT_LAT, ADAT_LON, customerData.location.lat, customerData.location.lng);
   if (distance > MAX_DISTANCE_KM) {
     showToast("❌ Delivery address is outside our 5 km area. Please update location.");
-    closeAddressFlow();
     startMultiStepFlow();
     return;
   }
@@ -2622,9 +2721,14 @@ async function sendFinalWhatsApp() {
       if (handoff) handoff.opener = null;
     }
     await sendCheckoutToWhatsApp(handoff);
-  } catch {
+  } catch (error) {
     handoff?.close();
-    showToast('Could not complete checkout. Your cart is still available. Try again.');
+    const messages = {
+      offer_already_used: 'Your mobile number already used this offer. Remove the offer item to continue.',
+      offer_not_available: 'An offer in your cart has ended or changed. Remove it and check the Offers page.',
+      phone_verification_required: 'This offer requires a verified mobile number. Remove the offer item to continue.'
+    };
+    showToast(messages[error.message] || 'Could not complete checkout. Your cart is still available. Try again.');
   } finally {
     checkoutInProgress = false;
   }
@@ -2634,7 +2738,7 @@ async function sendCheckoutToWhatsApp(handoff) {
   const owner = customerProfileOwner;
   const details = structuredClone(customerData);
   const orderCart = structuredClone(cart);
-  if (cloudStore?.enabled && (!owner || !details.name || !details.phone || !details.house ||
+  if (cloudStore?.enabled && (!details.name || !details.phone || !details.house ||
       !Number.isFinite(details.location.lat) || !Number.isFinite(details.location.lng))) {
     throw new Error('Checkout details are incomplete.');
   }
@@ -2660,20 +2764,28 @@ async function sendCheckoutToWhatsApp(handoff) {
     const qty = item.qty;
     const line = `🛒 ${p.name} (${unit}) × ${qty} = ₹${price * qty}`;
     itemLines.push(line);
-    orderItems.push({ product_id: p.id, name: p.name, unit, unit_price: price, quantity: qty });
+    const orderItem = { product_id: p.id, name: p.name, unit, unit_price: price, quantity: qty };
+    if (item.offerKey) {
+      if (!owner) throw new Error('phone_verification_required');
+      const campaign = getAvailableOffers().find(offer => offer.key === item.offerKey && offer.productId === p.id && offer.newPrice === price);
+      if (!campaign) throw new Error('offer_not_available');
+      orderItem.offer_key = campaign.key;
+    }
+    orderItems.push(orderItem);
     if (isMeatProduct(p)) hasMeat = true;
   }
 
   if (!orderItems.length) throw new Error('The cart is empty.');
   let orderId = 'ORD' + Date.now().toString().slice(-6);
-  if (cloudStore?.enabled) {
+  const offerKeys = orderItems.filter(item => item.offer_key).map(item => item.offer_key);
+  if (cloudStore?.enabled && owner) {
     const profile = normalizeCloudCustomerData(details);
     delete profile.preOrderDateTime;
     delete profile.roadDistance;
     const order = {
       customer: { ...profile, scheduled_delivery: details.preOrderDateTime },
       items: orderItems,
-      offer_keys: getOrderOfferKeys(orderItems),
+      offer_keys: offerKeys,
       subtotal, delivery_charge: deliveryCharge, eco_box_charge: ecoCharge, total
     };
     const signature = JSON.stringify([owner, order]);
@@ -2696,6 +2808,7 @@ async function sendCheckoutToWhatsApp(handoff) {
 
   msg += `🛍️ *Items:*\n`;
   msg += itemLines.join('\n') + '\n\n';
+  if (offerKeys.length) msg += 'Offers: ' + offerKeys.join(', ') + '\n';
   if (details.preOrderDateTime) msg += 'Scheduled delivery: ' + new Date(details.preOrderDateTime).toLocaleString() + '\n';
 
   msg += `🚚 *Delivery charge:* ₹${deliveryCharge}\n`;
@@ -2724,6 +2837,7 @@ async function sendCheckoutToWhatsApp(handoff) {
   closeAddressFlow();
   showToast('Send your order in WhatsApp to request confirmation.');
   if (cloudStore?.enabled && (!handoff || handoff.closed)) window.location.assign(whatsappUrl);
+  if (cloudStore?.enabled && !owner) resetCustomerData();
   pendingOrderDraft = null;
 }
 
@@ -2755,6 +2869,154 @@ async function showCloudOrderHistory(account) {
   }
 }
 
+function normalizeLoginPhone(value) {
+  const phone = value.normalize('NFKC').replace(/[\s().\p{Dash_Punctuation}\p{Cf}]/gu, '');
+  if (/^(?:\+?91)?[6-9]\d{9}$/.test(phone)) return '+91' + phone.slice(-10);
+  if (phone.startsWith('+91')) return '';
+  if (/^\+[1-9]\d{7,14}$/.test(phone)) return phone;
+  return '';
+}
+
+function getAccountContactPhone(account) {
+  const phone = account?.phone_confirmed_at ? account.phone : account?.user_metadata?.contact_phone;
+  return normalizeLoginPhone(String(phone ?? ''));
+}
+
+let phoneAuthMode = 'signup';
+let phoneAuthFromCheckout = false;
+
+function showPhoneAuthStep(mode, phone = '') {
+  phoneAuthMode = mode;
+  const signup = mode === 'signup';
+  document.getElementById('phoneAuthNumber').value = phone;
+  document.getElementById('phoneAuthTitle').textContent = signup ? 'Sign up' : 'Log in';
+  document.getElementById('phoneAuthContinue').textContent = signup ? 'Continue with mobile number' : 'Log in';
+  document.getElementById('phoneAuthSwitch').textContent = signup ? 'Already registered? Log in' : 'New customer? Sign up';
+  document.getElementById('phoneAuthStatus').textContent = '';
+  if (mode && document.getElementById('phoneAuthDialog').open) document.getElementById('phoneAuthNumber').focus();
+}
+
+function openPhoneAuth(mode, fromCheckout = false, phone = '') {
+  const dialog = document.getElementById('phoneAuthDialog');
+  phoneAuthFromCheckout = fromCheckout;
+  showPhoneAuthStep(mode, phone);
+  if (!dialog.open) {
+    dialog.showModal();
+    document.getElementById('phoneAuthNumber').focus();
+  }
+}
+
+async function startGoogleSignIn(event) {
+  if (isFilePreview) {
+    location.assign(document.querySelector('link[rel="canonical"]').href);
+    return;
+  }
+
+  const button = event.currentTarget;
+  const dialog = document.getElementById('phoneAuthDialog');
+  button.disabled = true;
+  if (dialog.open) {
+    try {
+      sessionStorage.setItem(mobileAuthReturnKey, JSON.stringify({
+        mode: phoneAuthMode,
+        checkout: phoneAuthFromCheckout,
+        phone: normalizeLoginPhone(document.getElementById('phoneAuthNumber').value)
+      }));
+    } catch {}
+  }
+  try {
+    await cloudStore.signIn();
+  }
+  catch {
+    try { sessionStorage.removeItem(mobileAuthReturnKey); } catch {}
+    button.disabled = false;
+    const message = 'Could not start Google sign-in. Please try again.';
+    if (dialog.open) document.getElementById('phoneAuthStatus').textContent = message;
+    else showToast(message);
+  }
+}
+
+async function continueMobileAccount(phone, mode, fromCheckout) {
+  let account = await cloudStore.getUser();
+  if (!account && mode === 'signup') account = await cloudStore.startMobileSession(phone);
+  if (!account) return 'Use the browser where you are still signed in, or continue with Google if you registered with Google.';
+
+  const details = normalizeCloudCustomerData(await cloudStore.loadProfile(account.id));
+  const savedPhone = normalizeLoginPhone(details.phone) || getAccountContactPhone(account);
+  if (savedPhone && savedPhone !== phone) {
+    return 'Enter the delivery number saved on this account.';
+  }
+  if (mode === 'login' && !savedPhone) {
+    return 'This account has no delivery number yet. Choose Sign up to add your delivery details.';
+  }
+
+  applyCustomerProfile(account, { ...details, phone });
+  document.getElementById('phoneAuthDialog').close();
+  if (!hasDeliveryProfile(customerData)) openDeliveryProfile(fromCheckout, true);
+  else if (fromCheckout) showCheckoutReview();
+  else openAccountModal();
+  return '';
+}
+
+async function resumeMobileAuthAfterGoogle() {
+  let pending;
+  try {
+    pending = JSON.parse(sessionStorage.getItem(mobileAuthReturnKey));
+    sessionStorage.removeItem(mobileAuthReturnKey);
+  } catch { return; }
+  if (!pending || !['login', 'signup'].includes(pending.mode)) return;
+  openPhoneAuth(pending.mode, pending.checkout === true, pending.phone || '');
+  try {
+    if (pending.phone && await cloudStore.getUser() && document.getElementById('phoneAuthDialog').open) {
+      document.getElementById('phoneAuthRequest').requestSubmit();
+    }
+  } catch {}
+}
+
+function initPhoneAuth() {
+  const dialog = document.getElementById('phoneAuthDialog');
+  const status = document.getElementById('phoneAuthStatus');
+  const number = document.getElementById('phoneAuthNumber');
+  const submit = document.getElementById('phoneAuthContinue');
+  const switchMode = document.getElementById('phoneAuthSwitch');
+  const google = document.getElementById('phoneAuthGoogle');
+  const spinner = document.getElementById('phoneAuthSpinner');
+  const close = document.getElementById('phoneAuthClose');
+  google.textContent = googleSignInLabel;
+  on('phoneAuthGoogle', 'click', startGoogleSignIn);
+  on('phoneAuthSwitch', 'click', () => showPhoneAuthStep(phoneAuthMode === 'signup' ? 'login' : 'signup', number.value));
+  on('phoneAuthClose', 'click', () => dialog.close());
+  on('phoneAuthNumber', 'input', () => { status.textContent = ''; });
+  dialog.addEventListener('cancel', event => {
+    if (submit.disabled) event.preventDefault();
+  });
+  dialog.addEventListener('close', () => {
+    document.getElementById('phoneAuthRequest').reset();
+  });
+
+  on('phoneAuthRequest', 'submit', async event => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    const phone = normalizeLoginPhone(number.value);
+    if (!phone) { status.textContent = 'Enter a 10-digit Indian mobile number or include your country code.'; return; }
+    const controls = [number, submit, switchMode, google, close];
+    controls.forEach(control => { control.disabled = true; });
+    spinner.hidden = false;
+    status.textContent = phoneAuthMode === 'signup' ? 'Preparing delivery details…' : 'Loading your saved delivery details…';
+    try {
+      status.textContent = await continueMobileAccount(phone, phoneAuthMode, phoneAuthFromCheckout);
+    } catch (error) {
+      status.textContent = error.code === 'anonymous_provider_disabled'
+        ? 'Mobile sign-up is unavailable. Continue with Google to save your delivery details.'
+        : 'Could not open your delivery details. Please try again.';
+    } finally {
+      spinner.hidden = true;
+      controls.forEach(control => { control.disabled = false; });
+    }
+  });
+  resumeMobileAuthAfterGoogle();
+}
+
 async function renderAccountModal() {
   const body = document.getElementById('accountModalBody');
   if (!body) return;
@@ -2765,13 +3027,16 @@ async function renderAccountModal() {
     body.textContent = 'Loading your account…';
     try {
       account = await cloudStore.getUser();
-      user = account ? normalizeCloudCustomerData(await cloudStore.loadProfile(account.id)) : null;
+      if (account) {
+        user = normalizeCloudCustomerData(await cloudStore.loadProfile(account.id));
+        if (!user.phone) user.phone = getAccountContactPhone(account);
+      }
     } catch {
       body.innerHTML = '<button class="login-btn" type="button" id="retryCloudAccount">Retry loading account</button>';
       document.getElementById('retryCloudAccount').addEventListener('click', renderAccountModal);
       return;
     }
-  } else {
+  } else if (!cloudStore?.enabled) {
     user = getLocalCustomerData();
   }
 
@@ -2782,11 +3047,13 @@ async function renderAccountModal() {
     body.innerHTML = `
       <div class="user-info">
         <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
-        <div class="user-name">${escapeHtml(user.name || account?.email || 'Your account')}</div>
+        <div class="user-name">${escapeHtml(user.name || account?.phone || account?.email || 'Your account')}</div>
+        ${account?.is_anonymous ? '<p class="user-detail">Your account is available in this browser while you stay signed in.</p>' : account ? '<p class="user-detail">Signed in</p>' : ''}
         ${user.phone ? `<div class="user-detail"><i class="fas fa-phone"></i> ${escapeHtml(user.phone)}</div>` : ''}
         ${cleanAddress ? `<div class="user-address">📍 ${escapeHtml(cleanAddress)}</div>` : ''}
-        <div class="user-detail"><i class="fas fa-envelope"></i> ${escapeHtml(account?.email || 'fresh4adat@gmail.com')}</div>
-        <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-edit"></i> Edit Profile</button>
+        ${account?.email ? `<div class="user-detail">${escapeHtml(account.email)}</div>` : ''}
+        ${account?.phone_confirmed_at && account.phone ? `<p class="user-detail">Verified mobile: ${escapeHtml(account.phone)}</p>` : ''}
+        <button id="editProfileBtn" class="edit-profile-btn"><i class="fas fa-edit"></i> ${hasDeliveryProfile(user) ? 'Edit delivery details' : 'Add delivery details'}</button>
       </div>
       <div class="account-menu">
         ${account ? '<button class="menu-item" type="button" id="cloudOrdersBtn"><i class="fas fa-receipt"></i><span>Order History</span></button>' : ''}
@@ -2842,7 +3109,7 @@ async function renderAccountModal() {
     document.getElementById('privacyBtnLogged')?.addEventListener('click', () => {
       showStaticContent('Privacy Policy', `
         <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
-        <p><strong>Data Security</strong><br> ${cloudStore?.enabled ? 'Google verifies your account. Supabase stores your delivery profile and orders. When you send an order through WhatsApp, the shop receives your contact and delivery details.' : 'The site saves your delivery details in this browser. When you send an order through WhatsApp, the shop receives your contact and delivery details.'}</p>
+        <p><strong>Data Security</strong><br> ${cloudStore?.enabled ? 'Supabase stores signed-in customers’ delivery profiles and orders. Mobile numbers entered to start a shopping session are used as delivery contact details. When you send an order through WhatsApp, the shop receives your contact and delivery details.' : 'The site saves your delivery details in this browser. When you send an order through WhatsApp, the shop receives your contact and delivery details.'}</p>
         <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
         <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
       `);
@@ -2877,9 +3144,10 @@ async function renderAccountModal() {
     <div class="guest-section">
       <div class="guest-icon"><i class="fas fa-user-circle"></i></div>
       <h2>Hi, Guest</h2>
-      <p>${cloudStore?.enabled ? 'Sign in to save your delivery details and see your orders.' : 'Save your delivery details for faster checkout.'}</p>
+      <p>Save your delivery details for faster checkout.</p>
       <p><i class="fas fa-envelope"></i> fresh4adat@gmail.com</p>
-      <button id="accountLoginBtn" class="login-btn"><i class="fas fa-sign-in-alt"></i> ${cloudStore?.enabled ? 'Continue with Google' : 'Save delivery details'}</button>
+      <button id="accountLoginBtn" class="login-btn"><i class="fas fa-sign-in-alt"></i> ${cloudStore?.enabled ? 'Log in' : 'Save delivery details'}</button>
+      ${cloudStore?.enabled ? `<button class="phone-auth-secondary account-signup" type="button" id="accountSignupBtn">Sign up</button><button class="phone-auth-link account-signup" type="button" id="accountGoogleBtn">${googleSignInLabel}</button>` : ''}
     </div>
     <div class="account-menu">
       <div class="menu-item" id="contactUsBtnGuest"><i class="fas fa-headset"></i><span>Contact Us</span><i class="fas fa-chevron-right"></i></div>
@@ -2890,20 +3158,12 @@ async function renderAccountModal() {
     </div>
   `;
 
-  document.getElementById('accountLoginBtn')?.addEventListener('click', async event => {
-    if (cloudStore?.enabled) {
-      const button = event.currentTarget;
-      button.disabled = true;
-      try { await cloudStore.signIn(); }
-      catch {
-        button.disabled = false;
-        showToast(location.protocol === 'file:' ? 'Open the hosted Fresh Adat website to sign in.' : 'Could not start Google sign-in. Try again.');
-      }
-    } else {
-      closeAccountModalFunc();
-      openAddressFlowForLogin();
-    }
+  document.getElementById('accountLoginBtn')?.addEventListener('click', () => {
+    if (cloudStore?.enabled) openPhoneAuth('login');
+    else { closeAccountModalFunc(); openAddressFlowForLogin(); }
   });
+  document.getElementById('accountSignupBtn')?.addEventListener('click', () => openPhoneAuth('signup'));
+  document.getElementById('accountGoogleBtn')?.addEventListener('click', startGoogleSignIn);
   document.getElementById('contactUsBtnGuest')?.addEventListener('click', () => {
     showStaticContent('Contact Us', `
       <p><strong>📞 Phone:</strong> <a href="tel:+919496840336">+91 94968 40336</a></p>
@@ -2941,7 +3201,7 @@ async function renderAccountModal() {
   document.getElementById('privacyBtnGuest')?.addEventListener('click', () => {
     showStaticContent('Privacy Policy', `
       <p><strong>Information Collection</strong><br>We collect name, phone, address for delivery purposes.</p>
-      <p><strong>Data Security</strong><br> ${cloudStore?.enabled ? 'Google verifies your account. Supabase stores your delivery profile and orders. When you send an order through WhatsApp, the shop receives your contact and delivery details.' : 'The site saves your delivery details in this browser. When you send an order through WhatsApp, the shop receives your contact and delivery details.'}</p>
+      <p><strong>Data Security</strong><br> ${cloudStore?.enabled ? 'Supabase stores signed-in customers’ delivery profiles and orders. Mobile numbers entered to start a shopping session are used as delivery contact details. When you send an order through WhatsApp, the shop receives your contact and delivery details.' : 'The site saves your delivery details in this browser. When you send an order through WhatsApp, the shop receives your contact and delivery details.'}</p>
       <p><strong>Cookies</strong><br>We use cookies to improve your shopping experience.</p>
       <p><strong>Your Rights</strong><br>You may request deletion of your data by contacting us.</p>
     `);
@@ -2963,7 +3223,19 @@ function closeAccountModalFunc() {
 
 async function openAddressFlowForLogin() {
   if (!(await loadSavedCustomerData())) return;
+  if (cloudStore?.enabled && !customerProfileOwner) { openPhoneAuth('signup'); return; }
+  openDeliveryProfile(false);
+}
+
+function openDeliveryProfile(returnToCheckout, lockPhone = false) {
   isLoginMode = true;
+  profileCheckoutPending = returnToCheckout;
+  profilePhoneLocked = lockPhone;
+  closeAccountModalFunc();
+  if (returnToCheckout) {
+    closeCart();
+    if (stickyBar) stickyBar.style.display = 'none';
+  }
   const modal = document.getElementById('addressFlowModal');
   if (modal) modal.style.display = 'flex';
   startMultiStepFlow();
@@ -3310,8 +3582,8 @@ function initAddressFlow() {
   addressFlowModal = document.getElementById('addressFlowModal');
   if (!addressFlowModal) return;
 
-  on('closeAddressFlow', 'click', closeAddressFlow);
-  on('backArrowBtn', 'click', handleBack);
+  on('closeAddressFlow', 'click', () => { if (!savingCustomerProfile) closeAddressFlow(); });
+  on('backArrowBtn', 'click', () => { if (!savingCustomerProfile) handleBack(); });
 
   on('confirmLocationBtn', 'click', () => {
     if (currentLocationValid) {
@@ -3342,28 +3614,30 @@ function initAddressFlow() {
   on('nextToConfirmBtn', 'click', async () => {
     const name = document.getElementById('custFullName');
     const phone = document.getElementById('custPhoneNumber');
-    if (!name || !name.value.trim() || !phone || !phone.value.trim()) {
-      showToast('Please enter your full name and phone number');
+    const deliveryPhone = normalizeLoginPhone(profilePhoneLocked ? customerData.phone : phone?.value || '');
+    if (!name?.value.trim() || !deliveryPhone) {
+      showToast('Enter your full name and a valid mobile number.');
       return;
     }
     customerData.name = name.value.trim();
-    customerData.phone = phone.value.trim();
-    if (!isLoginMode && !cloudStore?.enabled && !(await saveCustomerData())) return;
-    document.getElementById('sendWhatsAppFinalBtn').textContent = isLoginMode ? 'Save Profile' : 'Continue to WhatsApp';
+    customerData.phone = deliveryPhone;
+    if (isLoginMode) {
+      await saveAccountProfile();
+      return;
+    }
+    if (!cloudStore?.enabled && !(await saveCustomerData())) return;
+    document.getElementById('sendWhatsAppFinalBtn').textContent = 'Send order on WhatsApp';
     showStep(4);
   });
 
-  on('sendWhatsAppFinalBtn', 'click', () => {
-    if (isLoginMode) saveAccountProfile();
-    else sendFinalWhatsApp();
-  });
+  on('sendWhatsAppFinalBtn', 'click', sendFinalWhatsApp);
   on('editAddressBtn', 'click', startMultiStepFlow);
   on('sendFromSummaryBtn', 'click', sendOrderFromSummary);
 
   on('useMyLocationBtn', 'click', useCurrentLocation);
 
   addressFlowModal.addEventListener('click', (e) => {
-    if (e.target === addressFlowModal) closeAddressFlow();
+    if (e.target === addressFlowModal && !savingCustomerProfile) closeAddressFlow();
   });
 }
 
@@ -3501,6 +3775,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupGlobalListeners();
     initSearchListeners();
     initAddressFlow();
+    initPhoneAuth();
     loadData();
 
     const offerModal = document.getElementById('offerDetailModal');

@@ -3733,3 +3733,77 @@ body:has(.freezer-entrance:not([hidden])) { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .freezer-entrance.is-opening { animation-duration: 1ms; }
 }
+
+/* Mobile account form */
+.phone-auth-dialog {
+  width: min(440px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 26px 22px 20px;
+  border: 1px solid #deece0;
+  border-radius: 20px;
+  color: var(--text);
+  background: #fff;
+  box-shadow: 0 14px 64px rgba(23, 62, 43, 0.24);
+}
+.phone-auth-dialog::backdrop { background: rgba(18, 45, 32, 0.48); }
+.phone-auth-dialog h2 {
+  margin: 0 32px 12px 0;
+  font: 700 clamp(1.3rem, 4.8vw, 1.65rem)/1.2 'Playfair Display', Georgia, serif;
+  color: var(--green);
+}
+.phone-auth-close {
+  position: absolute;
+  inset: 12px 12px auto auto;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green-pale);
+  color: var(--green);
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+.phone-auth-actions { display: grid; gap: 10px; }
+.phone-auth-actions[hidden] { display: none; }
+.phone-auth-actions input {
+  padding: 12px;
+  border: 1px solid #aec9b7;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 1rem;
+}
+.phone-auth-dialog .login-btn { width: 100%; margin: 0; }
+.phone-auth-secondary, .phone-auth-link {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #b5cdbb;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--green);
+  font: 700 0.9rem 'DM Sans', sans-serif;
+  cursor: pointer;
+}
+.phone-auth-link { border-color: transparent; text-decoration: underline; }
+.phone-auth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 0.86rem;
+}
+.phone-auth-status:has(#phoneAuthStatus:empty) { margin-top: 0; }
+.phone-auth-spinner {
+  flex: 0 0 16px;
+  height: 16px;
+  border: 2px solid #b5cdbb;
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: phone-auth-spin 800ms linear infinite;
+}
+.phone-auth-spinner[hidden] { display: none; }
+@keyframes phone-auth-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .phone-auth-spinner { animation: none; }
+}
+.account-signup { margin-top: 8px; }

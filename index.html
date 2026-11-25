@@ -265,7 +265,7 @@
                 <div id="savedSummaryCard" class="saved-summary-card" style="display: none;">
                     <div class="summary-card-header">
                         <i class="fas fa-check-circle"></i>
-                        <span>Saved Address</span>
+                        <span>Review Your Order</span>
                     </div>
                     <div class="summary-card-details" id="savedSummaryDetails"></div>
                     <div class="summary-card-buttons">
@@ -332,6 +332,22 @@
             <button id="addOfferToCartBtn" class="add-offer-cart-btn">🛒 Add to Cart</button>
         </div>
     </div>
+
+    <dialog class="phone-auth-dialog" id="phoneAuthDialog" aria-labelledby="phoneAuthTitle">
+        <button class="phone-auth-close" id="phoneAuthClose" type="button" aria-label="Close">&times;</button>
+        <h2 id="phoneAuthTitle">Sign up</h2>
+        <form id="phoneAuthRequest" class="phone-auth-actions">
+            <label for="phoneAuthNumber">Mobile number</label>
+            <input id="phoneAuthNumber" type="tel" autocomplete="tel" placeholder="10-digit mobile number" required>
+            <button class="login-btn" type="submit" id="phoneAuthContinue">Continue with mobile number</button>
+            <button class="phone-auth-link" id="phoneAuthSwitch" type="button">Already registered? Log in</button>
+            <button class="phone-auth-link" id="phoneAuthGoogle" type="button">Continue with Google</button>
+        </form>
+        <p class="phone-auth-status" role="status">
+            <span class="phone-auth-spinner" id="phoneAuthSpinner" aria-hidden="true" hidden></span>
+            <span id="phoneAuthStatus"></span>
+        </p>
+    </dialog>
 
     <!-- ===== ACCOUNT MODAL ===== -->
     <div id="accountModal" class="account-modal" style="display: none;">

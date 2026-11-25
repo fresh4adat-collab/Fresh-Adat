@@ -1,11 +1,12 @@
 // sw.js - Service Worker for Fresh Adat PWA
 
-const CACHE_NAME = 'fresh-adat-v1';
+const CACHE_NAME = 'fresh-adat-v6';
 const urlsToCache = [
   '/',
   '/index.html',
   '/style.css',
   '/script.js',
+  '/database.js',
   '/manifest.json',
   '/offline.html',
   // External assets (Google Fonts, Font Awesome)
@@ -47,6 +48,8 @@ self.addEventListener('fetch', event => {
 
   // Skip non-GET requests, Chrome extensions, etc.
   if (event.request.method !== 'GET') return;
+  if (requestUrl.hostname.endsWith('.supabase.co') || requestUrl.pathname === '/database-config.js' ||
+      requestUrl.searchParams.has('code')) return;
 
   // For API calls (Google Sheets, external images) – network first, no cache
   if (requestUrl.hostname.includes('opensheet.elk.sh') ||
